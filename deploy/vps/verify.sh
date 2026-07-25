@@ -7,6 +7,7 @@ runtime_root="${VPS_RUNTIME_PATH:-/opt/0xda-market-runtime}"
 state_file="$runtime_root/active-environment"
 verify_systemd="${VERIFY_SYSTEMD:-1}"
 verify_public_https="${VERIFY_PUBLIC_HTTPS:-1}"
+expected_edge_network="nilx-edge"
 
 fail() {
   echo "verification failed: $*" >&2
@@ -73,6 +74,18 @@ check_container() {
   echo "ok: $label"
 }
 
+check_network_membership() {
+  local label="$1"
+  local container_id="$2"
+  local networks
+
+  networks="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container_id")"
+  grep -qx "$expected_edge_network" <<<"$networks" || \
+    fail "$label is not attached to $expected_edge_network"
+
+  echo "ok: $label network=$expected_edge_network"
+}
+
 [[ -f "$state_file" ]] || fail "active environment marker is missing: $state_file"
 active_environment="$(<"$state_file")"
 case "$active_environment" in
@@ -92,11 +105,21 @@ bot_env="$bot_root/environments/$active_environment/shared/.env"
 [[ "$(read_env_value "$core_env" DEPLOY_ENV)" == "$active_environment" ]] || fail "core DEPLOY_ENV mismatch"
 [[ "$(read_env_value "$bot_env" DEPLOY_ENV)" == "$active_environment" ]] || fail "bot DEPLOY_ENV mismatch"
 
+core_edge_network="$(read_env_value "$core_env" MARKET_EDGE_NETWORK)"
+bot_edge_network="$(read_env_value "$bot_env" MARKET_EDGE_NETWORK)"
+[[ -z "$core_edge_network" || "$core_edge_network" == "$expected_edge_network" ]] || \
+  fail "core MARKET_EDGE_NETWORK must be $expected_edge_network"
+[[ -z "$bot_edge_network" || "$bot_edge_network" == "$expected_edge_network" ]] || \
+  fail "bot MARKET_EDGE_NETWORK must be $expected_edge_network"
+
 if [[ "$verify_systemd" == "1" ]]; then
   systemctl is-enabled --quiet docker || fail "Docker is not enabled at boot"
   systemctl is-active --quiet docker || fail "Docker is not active"
   echo "ok: Docker boot service"
 fi
+
+docker network inspect "$expected_edge_network" >/dev/null 2>&1 || \
+  fail "Docker network is missing: $expected_edge_network"
 
 compose "$core_release" "$core_env" config --quiet
 compose "$bot_release" "$bot_env" config --quiet
@@ -108,6 +131,10 @@ bot_container="$(container_for "$bot_release" "$bot_env" bot)"
 check_container "core API" "$api_container" 1
 check_container "Caddy" "$caddy_container" 0
 check_container "client bot" "$bot_container" 1
+
+check_network_membership "core API" "$api_container"
+check_network_membership "Caddy" "$caddy_container"
+check_network_membership "client bot" "$bot_container"
 
 compose "$core_release" "$core_env" exec -T caddy \
   caddy validate --config /etc/caddy/Caddyfile >/dev/null
@@ -129,5 +156,5 @@ if [[ "$verify_public_https" == "1" ]]; then
   echo "ok: public HTTPS health"
 fi
 
-printf 'VPS verification passed: environment=%s core=%s bot=%s\n' \
-  "$active_environment" "$(basename "$core_release")" "$(basename "$bot_release")"
+printf 'VPS verification passed: environment=%s core=%s bot=%s network=%s\n' \
+  "$active_environment" "$(basename "$core_release")" "$(basename "$bot_release")" "$expected_edge_network"

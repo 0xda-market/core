@@ -10,7 +10,12 @@ fi
 
 deploy_mode="${DEPLOY_MODE:-activate}"
 deploy_environment="$(sed -n 's/^DEPLOY_ENV=//p' .env | tail -n 1)"
-edge_network="${MARKET_EDGE_NETWORK:-zero-x-da-market-edge}"
+edge_network="${MARKET_EDGE_NETWORK:-nilx-edge}"
+
+if [[ "$edge_network" != "nilx-edge" ]]; then
+  echo "MARKET_EDGE_NETWORK must be nilx-edge" >&2
+  exit 1
+fi
 
 case "$deploy_mode" in
   stage|activate) ;;

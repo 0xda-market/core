@@ -54,10 +54,10 @@ Environment and the VPS directory containing the runtime file.
 The state file is written only after the selected core and bot releases pass
 health checks.
 
-Core Caddy, the core API and the active bot share the private external Docker
-network `zero-x-da-market-edge`. Both deploy scripts create it when missing. The
-bot remains bound to `127.0.0.1:10001`; Caddy reaches it through the internal
-alias `market-bot`.
+Core Caddy, the core API, the active bot and other nilx.one services share the
+private external Docker network `nilx-edge`. Both deploy scripts create it when
+missing. The bot remains bound to `127.0.0.1:10001`; Caddy reaches it through the
+internal alias `market-bot`.
 
 ## Bootstrap
 
@@ -103,6 +103,7 @@ Start from `deploy/vps/.env.example`:
 ```env
 DEPLOY_ENV=development
 DOMAIN=0xda-market.nilx.one
+MARKET_EDGE_NETWORK=nilx-edge
 DATABASE_URL=<development Supabase URL>
 PUBLIC_API_TOKEN=<development token>
 MANUAL_PROVIDER_TOKEN=<development token>
@@ -116,7 +117,7 @@ Bot development runtime:
 ```
 
 Use the matching core URL and token. Telegram tokens and webhook secrets belong
-only in the bot runtime file.
+only in the bot runtime file. Set `MARKET_EDGE_NETWORK=nilx-edge` there as well.
 
 Protect runtime files:
 
@@ -189,6 +190,9 @@ Run the complete read-only verifier after deployment and after every VPS reboot:
 sudo -u deploy \
   bash /opt/0xda-market/environments/development/current/deploy/vps/verify.sh
 ```
+
+The verifier requires the API, Caddy and bot containers to be attached to
+`nilx-edge` and validates both local and public health paths.
 
 Basic public smoke checks:
 

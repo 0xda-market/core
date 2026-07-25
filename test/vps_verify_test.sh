@@ -13,7 +13,7 @@ mkdir -p "$commands" "$runtime_root"
 for component in core bot; do
   release="$root/$component/environments/development/releases/release-1"
   mkdir -p "$release/deploy/vps" "$root/$component/environments/development/shared"
-  printf 'DEPLOY_ENV=development\n' >"$root/$component/environments/development/shared/.env"
+  printf 'DEPLOY_ENV=development\nMARKET_EDGE_NETWORK=nilx-edge\n' >"$root/$component/environments/development/shared/.env"
   if [[ "$component" == "core" ]]; then
     printf 'DOMAIN=example.invalid\n' >>"$root/$component/environments/development/shared/.env"
   fi
@@ -35,6 +35,10 @@ CURL
 cat >"$commands/docker" <<'DOCKER'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
+if [[ "$1" == "network" && "$2" == "inspect" && "$3" == "nilx-edge" ]]; then
+  exit 0
+fi
 
 if [[ "$1" == "compose" ]]; then
   shift
@@ -73,6 +77,7 @@ if [[ "$1" == "inspect" ]]; then
     *'max-size'*) printf '10m\n' ;;
     *'max-file'*) printf '3\n' ;;
     *'.State.Health'*) printf 'healthy\n' ;;
+    *'.NetworkSettings.Networks'*) printf 'nilx-edge\n' ;;
     *) exit 1 ;;
   esac
   exit 0
@@ -96,7 +101,11 @@ grep -Fq 'ok: Docker boot service' <<<"$output"
 grep -Fq 'ok: core API' <<<"$output"
 grep -Fq 'ok: Caddy' <<<"$output"
 grep -Fq 'ok: client bot' <<<"$output"
+grep -Fq 'ok: core API network=nilx-edge' <<<"$output"
+grep -Fq 'ok: Caddy network=nilx-edge' <<<"$output"
+grep -Fq 'ok: client bot network=nilx-edge' <<<"$output"
 grep -Fq 'ok: public HTTPS health' <<<"$output"
 grep -Fq 'VPS verification passed: environment=development' <<<"$output"
+grep -Fq 'network=nilx-edge' <<<"$output"
 
 echo 'VPS verification test passed'

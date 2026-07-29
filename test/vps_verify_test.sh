@@ -15,7 +15,7 @@ for component in core bot; do
   mkdir -p "$release/deploy/vps" "$root/$component/environments/development/shared"
   printf 'DEPLOY_ENV=development\nMARKET_EDGE_NETWORK=nilx-edge\n' >"$root/$component/environments/development/shared/.env"
   if [[ "$component" == "core" ]]; then
-    printf 'DOMAIN=example.invalid\n' >>"$root/$component/environments/development/shared/.env"
+    printf 'DOMAIN=example.invalid\nEDGE_OWNER=infra\n' >>"$root/$component/environments/development/shared/.env"
   fi
   : >"$release/deploy/vps/compose.yaml"
   ln -s "$release" "$root/$component/environments/development/current"
@@ -99,13 +99,11 @@ output="$({
 
 grep -Fq 'ok: Docker boot service' <<<"$output"
 grep -Fq 'ok: core API' <<<"$output"
-grep -Fq 'ok: Caddy' <<<"$output"
 grep -Fq 'ok: client bot' <<<"$output"
 grep -Fq 'ok: core API network=nilx-edge' <<<"$output"
-grep -Fq 'ok: Caddy network=nilx-edge' <<<"$output"
 grep -Fq 'ok: client bot network=nilx-edge' <<<"$output"
-grep -Fq 'ok: public HTTPS health' <<<"$output"
+grep -Fq 'ok: public HTTPS health through 0x0sky/infra edge' <<<"$output"
 grep -Fq 'VPS verification passed: environment=development' <<<"$output"
-grep -Fq 'network=nilx-edge' <<<"$output"
+grep -Fq 'network=nilx-edge edge-owner=infra' <<<"$output"
 
 echo 'VPS verification test passed'

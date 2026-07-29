@@ -28,7 +28,7 @@
 {$MIND_WEB_DOMAIN:mind.nilx.one} {
   encode zstd gzip
 
-  reverse_proxy mind-web:80 {
+  reverse_proxy mind-web:8080 {
     health_uri /health
     health_interval 30s
     health_timeout 5s

@@ -11,6 +11,7 @@ fi
 deploy_mode="${DEPLOY_MODE:-activate}"
 deploy_environment="$(sed -n 's/^DEPLOY_ENV=//p' .env | tail -n 1)"
 edge_network="${MARKET_EDGE_NETWORK:-nilx-edge}"
+edge_owner="$(sed -n 's/^EDGE_OWNER=//p' .env | tail -n 1)"
 
 if [[ "$edge_network" != "nilx-edge" ]]; then
   echo "MARKET_EDGE_NETWORK must be nilx-edge" >&2
@@ -58,12 +59,17 @@ if ! docker network inspect "$edge_network" >/dev/null 2>&1; then
 fi
 
 docker compose config --quiet
-docker compose pull mcp-control caddy
+docker compose pull mcp-control
 docker compose build --pull api
 
 if [[ "$deploy_mode" == "stage" ]]; then
   echo "0xda-market $deploy_environment release staged"
   exit 0
+fi
+
+if [[ "$edge_owner" != "infra" ]]; then
+  echo "EDGE_OWNER must be infra before activating the edge-decoupled product stack" >&2
+  exit 1
 fi
 
 if ! docker compose up --detach --remove-orphans; then

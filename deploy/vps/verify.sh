@@ -104,6 +104,7 @@ bot_env="$bot_root/environments/$active_environment/shared/.env"
 [[ -f "$bot_env" ]] || fail "bot runtime file is missing: $bot_env"
 [[ "$(read_env_value "$core_env" DEPLOY_ENV)" == "$active_environment" ]] || fail "core DEPLOY_ENV mismatch"
 [[ "$(read_env_value "$bot_env" DEPLOY_ENV)" == "$active_environment" ]] || fail "bot DEPLOY_ENV mismatch"
+[[ "$(read_env_value "$core_env" EDGE_OWNER)" == "infra" ]] || fail "core EDGE_OWNER must be infra"
 
 core_edge_network="$(read_env_value "$core_env" MARKET_EDGE_NETWORK)"
 bot_edge_network="$(read_env_value "$bot_env" MARKET_EDGE_NETWORK)"
@@ -125,21 +126,13 @@ compose "$core_release" "$core_env" config --quiet
 compose "$bot_release" "$bot_env" config --quiet
 
 api_container="$(container_for "$core_release" "$core_env" api)"
-caddy_container="$(container_for "$core_release" "$core_env" caddy)"
 bot_container="$(container_for "$bot_release" "$bot_env" bot)"
 
 check_container "core API" "$api_container" 1
-check_container "Caddy" "$caddy_container" 0
 check_container "client bot" "$bot_container" 1
 
 check_network_membership "core API" "$api_container"
-check_network_membership "Caddy" "$caddy_container"
 check_network_membership "client bot" "$bot_container"
-
-compose "$core_release" "$core_env" exec -T caddy \
-  caddy validate --config /etc/caddy/Caddyfile >/dev/null
-
-echo "ok: Caddy configuration"
 
 curl --fail --silent --show-error --retry 3 --retry-connrefused \
   http://127.0.0.1:10001/health >/dev/null
@@ -153,8 +146,8 @@ if [[ "$verify_public_https" == "1" ]]; then
     "https://${domain}/health" >/dev/null
   curl --fail --silent --show-error --retry 3 --retry-all-errors \
     "https://${domain}/bot/health" >/dev/null
-  echo "ok: public HTTPS health"
+  echo "ok: public HTTPS health through 0x0sky/infra edge"
 fi
 
-printf 'VPS verification passed: environment=%s core=%s bot=%s network=%s\n' \
+printf 'VPS verification passed: environment=%s core=%s bot=%s network=%s edge-owner=infra\n' \
   "$active_environment" "$(basename "$core_release")" "$(basename "$bot_release")" "$expected_edge_network"

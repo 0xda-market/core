@@ -87,6 +87,8 @@ jobs:
           cat >deploy/vps/.env <<'ENV'
           DEPLOY_ENV=development
           DOMAIN=example.invalid
+          MARKET_EDGE_NETWORK=nilx-edge
+          EDGE_OWNER=infra
           ENV
           docker compose --file deploy/vps/compose.yaml --env-file deploy/vps/.env config --quiet
 
@@ -96,10 +98,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --tag 0xda-market:test .
-      - name: Validate Caddy configuration
+      - name: Validate product-only Compose ownership
         run: |
-          docker run --rm \
-            --env DOMAIN=example.invalid \
-            --volume "$PWD/deploy/vps/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            caddy:2-alpine \
-            caddy validate --config /etc/caddy/Caddyfile
+          cat >deploy/vps/.env <<'ENV'
+          DEPLOY_ENV=development
+          DOMAIN=example.invalid
+          MARKET_EDGE_NETWORK=nilx-edge
+          EDGE_OWNER=infra
+          ENV
+          services="$(docker compose --file deploy/vps/compose.yaml --env-file deploy/vps/.env config --services)"
+          grep -qx api <<<"$services"
+          grep -qx mcp-control <<<"$services"
+          ! grep -qx caddy <<<"$services"
+          ! grep -R -E '(^|[^0-9])(80:80|443:443)' deploy/vps/compose.yaml
+          test ! -e deploy/vps/Caddyfile

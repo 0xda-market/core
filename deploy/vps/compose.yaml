@@ -14,7 +14,9 @@ services:
     ports:
       - "127.0.0.1:10000:10000"
     networks:
-      - edge
+      edge:
+        aliases:
+          - api
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 30s
@@ -68,40 +70,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    depends_on:
-      api:
-        condition: service_healthy
-    environment:
-      DOMAIN: ${DOMAIN}
-      MIND_WEB_DOMAIN: ${MIND_WEB_DOMAIN:-mind.nilx.one}
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - edge
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
 networks:
   edge:
     name: ${MARKET_EDGE_NETWORK:-nilx-edge}
     external: true
-
-volumes:
-  caddy_data:
-    name: zero-x-da-market-caddy-data
-  caddy_config:
-    name: zero-x-da-market-caddy-config

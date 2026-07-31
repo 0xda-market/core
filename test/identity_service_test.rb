@@ -104,6 +104,68 @@ class IdentityServiceTest < Minitest::Test
     assert_equal %w[github telegram], profile.identities.map(&:provider)
   end
 
+  def test_finds_a_profile_by_provider_user_id_without_listing_users
+    authentication = @service.authenticate(
+      provider: "telegram",
+      provider_user_id: 77,
+      provider_data: { username: "zero" }
+    )
+
+    profile = @service.find_profile_by_external_identity(
+      provider: "telegram",
+      provider_user_id: "77"
+    )
+
+    assert_equal authentication.user.id, profile.user.id
+    assert_equal ["77"], profile.identities.map(&:provider_user_id)
+  end
+
+  def test_finds_a_profile_by_case_insensitive_provider_data
+    authentication = @service.authenticate(
+      provider: "telegram",
+      provider_user_id: 77,
+      provider_data: { username: "Target_User" }
+    )
+
+    profile = @service.find_profile_by_external_identity(
+      provider: "telegram",
+      provider_data_key: "username",
+      provider_data_value: "target_user",
+      case_insensitive: true
+    )
+
+    assert_equal authentication.user.id, profile.user.id
+  end
+
+  def test_external_identity_lookup_requires_exactly_one_selector
+    error = assert_raises(ArgumentError) do
+      @service.find_profile_by_external_identity(provider: "telegram")
+    end
+    assert_includes error.message, "exactly one"
+
+    error = assert_raises(ArgumentError) do
+      @service.find_profile_by_external_identity(
+        provider: "telegram",
+        provider_user_id: 77,
+        provider_data_key: "username",
+        provider_data_value: "zero"
+      )
+    end
+    assert_includes error.message, "exactly one"
+  end
+
+  def test_external_identity_lookup_reports_not_found
+    error = assert_raises(ZeroXDA::Market::Core::NotFound) do
+      @service.find_profile_by_external_identity(
+        provider: "telegram",
+        provider_user_id: 404
+      )
+    end
+
+    assert_equal "not_found", error.code
+    assert_equal "external_identity", error.details.fetch("resource")
+  end
+
   def test_rejects_invalid_provider_names
     error = assert_raises(ArgumentError) do
       @service.authenticate(provider: "Telegram API", provider_user_id: 77)

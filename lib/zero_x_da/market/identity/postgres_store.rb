@@ -31,7 +31,7 @@ module ZeroXDA
           row && deserialize_identity(row)
         end
 
-        def find_identity_by_provider_data(provider:, key:, value:, case_insensitive: false)
+        def identities_by_provider_data(provider:, key:, value:, case_insensitive: false)
           comparison = if case_insensitive
                          Sequel.lit(
                            "lower(provider_data ->> ?) = lower(?)",
@@ -45,8 +45,11 @@ module ZeroXDA
                            value.to_s
                          )
                        end
-          row = @identities.where(provider: provider).where(comparison).first
-          row && deserialize_identity(row)
+          @identities.where(provider: provider)
+                     .where(comparison)
+                     .order(:created_at, :id)
+                     .all
+                     .map { |row| deserialize_identity(row) }
         end
 
         def identities_for_user(user_id)

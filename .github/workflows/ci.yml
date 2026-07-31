@@ -28,6 +28,10 @@ jobs:
             cat unit-test.log
             exit 1
           }
+      - name: Validate documented repository links
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash bin/check_documented_repositories
       - name: Upload unit failure log
         if: failure() && steps.unit_tests.outcome == 'failure'
         uses: actions/upload-artifact@v4
@@ -78,6 +82,7 @@ jobs:
       - name: Validate operational scripts
         run: |
           ruby -c bin/bootstrap_admin
+          bash -n bin/check_documented_repositories
           bash -n deploy/vps/bootstrap-ubuntu.sh
           bash -n deploy/vps/deploy.sh
           bash -n deploy/vps/switch-environment.sh

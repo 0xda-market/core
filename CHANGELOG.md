@@ -45,5 +45,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enforced bearer authentication on public and operator APIs and persisted
   admin-role authorization for privileged operations.
 
-[Unreleased]: https://github.com/0x0sky/0xda-market/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/0x0sky/0xda-market/releases/tag/v0.1.0
+[Unreleased]: https://github.com/0xda-market/core/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/0xda-market/core/releases/tag/v0.1.0

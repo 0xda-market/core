@@ -137,6 +137,32 @@ class IdentityServiceTest < Minitest::Test
     assert_equal authentication.user.id, profile.user.id
   end
 
+  def test_provider_data_lookup_fails_closed_when_multiple_identities_match
+    @service.authenticate(
+      provider: "telegram",
+      provider_user_id: 77,
+      provider_data: { username: "shared_name" }
+    )
+    @clock.advance(1)
+    @service.authenticate(
+      provider: "telegram",
+      provider_user_id: 78,
+      provider_data: { username: "Shared_Name" }
+    )
+
+    error = assert_raises(ZeroXDA::Market::Core::Conflict) do
+      @service.find_profile_by_external_identity(
+        provider: "telegram",
+        provider_data_key: "username",
+        provider_data_value: "shared_name",
+        case_insensitive: true
+      )
+    end
+
+    assert_equal "ambiguous_external_identity", error.code
+    assert_equal 2, error.details.fetch("matches")
+  end
+
   def test_external_identity_lookup_requires_exactly_one_selector
     error = assert_raises(ArgumentError) do
       @service.find_profile_by_external_identity(provider: "telegram")

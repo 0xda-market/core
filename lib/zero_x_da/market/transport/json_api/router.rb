@@ -43,6 +43,9 @@ module ZeroXDA
             path = request.path_info
 
             return route(:health, public: true) if method == "GET" && path == "/health"
+            if method == "GET" && path == "/v1/webapp/bootstrap" && available?(:products)
+              return route(:webapp_bootstrap, public: true)
+            end
             if method == "POST" && path == "/v1/auth/external" && available?(:authenticate_external)
               return route(:authenticate_external)
             end

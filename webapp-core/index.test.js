@@ -123,3 +123,40 @@ test("checkout requests happen only after explicit user actions", async () => {
   ]);
   assert.equal(controller.state.status, "succeeded");
 });
+
+test("selecting another product resets the quote and blocks stale completion", async () => {
+  let resolveFirstQuote;
+  const controller = new CheckoutController({
+    quote() {
+      return new Promise((resolve) => { resolveFirstQuote = resolve; });
+    },
+    async accept() {
+      throw new Error("accept must not run");
+    },
+    async refresh() {
+      throw new Error("refresh must not run");
+    }
+  });
+  const snapshot = createCatalogSnapshot(documentWithProducts(2));
+  const first = snapshot.products[0];
+  const second = snapshot.products[1];
+
+  const pending = controller.quote(first);
+  controller.reset(second);
+  resolveFirstQuote({ id: "stale-quote", attributes: {} });
+  await pending;
+
+  assert.equal(controller.state.status, "idle");
+  assert.equal(controller.state.product.id, second.id);
+  assert.throws(() => controller.accept(), /quote must be loaded/);
+});
+
+test("reset without a selection returns checkout to a clean idle state", () => {
+  const controller = new CheckoutController({
+    async quote() {},
+    async accept() {},
+    async refresh() {}
+  });
+
+  assert.deepEqual(controller.reset(), { status: "idle" });
+});

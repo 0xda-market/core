@@ -27,6 +27,8 @@ environment = ENV.fetch("DEPLOY_ENV", "development")
 public_token = ENV["PUBLIC_API_TOKEN"]
 operator_token = ENV["MANUAL_PROVIDER_TOKEN"]
 database_url = ENV["DATABASE_URL"]
+manual_quote_ttl = Integer(ENV.fetch("MANUAL_QUOTE_TTL_SECONDS", "900"))
+raise "MANUAL_QUOTE_TTL_SECONDS must be positive" unless manual_quote_ttl.positive?
 
 if environment == "production"
   required_secrets = {
@@ -83,6 +85,7 @@ manual_provider = if operator_token && !operator_token.empty?
                     ZeroXDA::Market::Providers::ManualProvider.new(
                       key: "manual.default",
                       clock: clock,
+                      quote_ttl: manual_quote_ttl,
                       **(task_store ? { task_store: task_store } : {})
                     )
                   end

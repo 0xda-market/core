@@ -42,6 +42,12 @@ class WebAppBootstrapAPITest < Minitest::Test
     def supported_currency?(value)
       value == "USDT"
     end
+
+    def convert(amount_usdt:, currency:)
+      raise ArgumentError, "unsupported test currency" unless currency == "USDT"
+
+      amount_usdt
+    end
   end
 
   def setup

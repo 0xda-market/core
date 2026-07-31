@@ -148,7 +148,7 @@ test("selecting another product resets the quote and blocks stale completion", a
 
   assert.equal(controller.state.status, "idle");
   assert.equal(controller.state.product.id, second.id);
-  assert.throws(() => controller.accept(), /quote must be loaded/);
+  await assert.rejects(controller.accept(), /quote must be loaded/);
 });
 
 test("reset without a selection returns checkout to a clean idle state", () => {

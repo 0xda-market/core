@@ -47,4 +47,30 @@ class PostgresExternalIdentityLookupTest < Minitest::Test
     assert_equal authentication.user.id, profile.user.id
     assert_equal "lookup-#{suffix}", profile.identities.first.provider_user_id
   end
+
+  def test_rejects_duplicate_provider_data_matches_in_postgresql
+    suffix = SecureRandom.hex(8)
+    @service.authenticate(
+      provider: "telegram",
+      provider_user_id: "lookup-a-#{suffix}",
+      provider_data: { username: "Shared_#{suffix}" }
+    )
+    @service.authenticate(
+      provider: "telegram",
+      provider_user_id: "lookup-b-#{suffix}",
+      provider_data: { username: "shared_#{suffix}" }
+    )
+
+    error = assert_raises(ZeroXDA::Market::Core::Conflict) do
+      @service.find_profile_by_external_identity(
+        provider: "telegram",
+        provider_data_key: "username",
+        provider_data_value: "shared_#{suffix}",
+        case_insensitive: true
+      )
+    end
+
+    assert_equal "ambiguous_external_identity", error.code
+    assert_equal 2, error.details.fetch("matches")
+  end
 end

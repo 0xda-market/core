@@ -58,6 +58,10 @@ module ZeroXDA
             if method == "POST" && path == "/v1/admin/prices" && available?(:apply_prices)
               return route(:apply_prices)
             end
+            if method == "GET" && path == "/v1/admin/users/by-external-identity" &&
+               available?(:users) && available?(:assign_admin)
+              return route(:external_identity_user)
+            end
             if method == "GET" && path == "/v1/users" && available?(:users)
               return route(:users)
             end

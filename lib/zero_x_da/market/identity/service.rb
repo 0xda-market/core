@@ -9,6 +9,7 @@ module ZeroXDA
     module Identity
       class Service
         PROVIDER_PATTERN = /\A[a-z][a-z0-9._-]{0,63}\z/
+        PROVIDER_DATA_KEY_PATTERN = /\A[a-zA-Z][a-zA-Z0-9._-]{0,63}\z/
         AUTHENTICATABLE_ROLES = %w[client broker].freeze
         ROLE_RANK = { "client" => 0, "broker" => 1, "admin" => 2 }.freeze
 
@@ -41,6 +42,33 @@ module ZeroXDA
 
         def active_users
           @store.list_users(status: "active")
+        end
+
+        def find_profile_by_external_identity(
+          provider:,
+          provider_user_id: nil,
+          provider_data_key: nil,
+          provider_data_value: nil,
+          case_insensitive: false
+        )
+          provider = normalize_provider(provider)
+          selector = normalize_lookup_selector(
+            provider_user_id: provider_user_id,
+            provider_data_key: provider_data_key,
+            provider_data_value: provider_data_value,
+            case_insensitive: case_insensitive
+          )
+
+          @store.transaction do |store|
+            identity = lookup_identity(store, provider, selector)
+            raise Core::NotFound.new("external_identity", lookup_reference(provider, selector)) unless identity
+
+            user = store.find_user(identity.user_id) || raise(Core::NotFound.new("user", identity.user_id))
+            UserProfile.new(
+              user: user,
+              identities: store.identities_for_user(user.id).freeze
+            )
+          end
         end
 
         private
@@ -102,6 +130,76 @@ module ZeroXDA
           Authentication.new(user: user, identity: identity, created: true)
         end
 
+        def lookup_identity(store, provider, selector)
+          if selector.key?(:provider_user_id)
+            return store.find_identity(
+              provider: provider,
+              provider_user_id: selector.fetch(:provider_user_id)
+            )
+          end
+
+          identities = store.identities_by_provider_data(
+            provider: provider,
+            key: selector.fetch(:provider_data_key),
+            value: selector.fetch(:provider_data_value),
+            case_insensitive: selector.fetch(:case_insensitive)
+          )
+          return identities.first if identities.length == 1
+          return nil if identities.empty?
+
+          raise Core::Conflict.new(
+            "external identity selector is ambiguous",
+            code: "ambiguous_external_identity",
+            details: {
+              provider: provider,
+              provider_data_key: selector.fetch(:provider_data_key),
+              matches: identities.length
+            }
+          )
+        end
+
+        def normalize_lookup_selector(
+          provider_user_id:,
+          provider_data_key:,
+          provider_data_value:,
+          case_insensitive:
+        )
+          has_provider_user_id = !provider_user_id.nil? && !provider_user_id.to_s.empty?
+          has_provider_data = !provider_data_key.nil? || !provider_data_value.nil?
+          unless has_provider_user_id ^ has_provider_data
+            raise ArgumentError, "provide exactly one external identity selector"
+          end
+
+          if has_provider_user_id
+            unless case_insensitive == false
+              raise ArgumentError, "case_insensitive is only valid for provider data lookup"
+            end
+
+            return { provider_user_id: normalize_provider_user_id(provider_user_id) }.freeze
+          end
+
+          unless provider_data_key && provider_data_value
+            raise ArgumentError, "provider_data_key and provider_data_value are required together"
+          end
+          unless case_insensitive == true || case_insensitive == false
+            raise ArgumentError, "case_insensitive must be boolean"
+          end
+
+          {
+            provider_data_key: normalize_provider_data_key(provider_data_key),
+            provider_data_value: normalize_provider_data_value(provider_data_value),
+            case_insensitive: case_insensitive
+          }.freeze
+        end
+
+        def lookup_reference(provider, selector)
+          if selector.key?(:provider_user_id)
+            "#{provider}:#{selector.fetch(:provider_user_id)}"
+          else
+            "#{provider}:#{selector.fetch(:provider_data_key)}=#{selector.fetch(:provider_data_value)}"
+          end
+        end
+
         def fetch_active_user(store, id)
           user = store.find_user(id) || raise(Core::NotFound.new("user", id))
           if user.status != "active"
@@ -143,6 +241,23 @@ module ZeroXDA
           raise ArgumentError, "provider_user_id is too long" if identifier.bytesize > 256
 
           identifier.freeze
+        end
+
+        def normalize_provider_data_key(value)
+          key = value.to_s
+          unless PROVIDER_DATA_KEY_PATTERN.match?(key)
+            raise ArgumentError, "provider_data_key must be an identifier"
+          end
+
+          key.freeze
+        end
+
+        def normalize_provider_data_value(value)
+          item = value.to_s
+          raise ArgumentError, "provider_data_value must not be empty" if item.empty?
+          raise ArgumentError, "provider_data_value is too long" if item.bytesize > 256
+
+          item.freeze
         end
 
         def normalize_role(value)

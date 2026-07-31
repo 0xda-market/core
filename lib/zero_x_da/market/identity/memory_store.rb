@@ -44,6 +44,18 @@ module ZeroXDA
           end
         end
 
+        def identities_by_provider_data(provider:, key:, value:, case_insensitive: false)
+          expected = value.to_s
+          @monitor.synchronize do
+            @identities.values.select do |identity|
+              next false unless identity.provider == provider
+
+              actual = identity.provider_data[key.to_s]
+              case_insensitive ? actual.to_s.casecmp?(expected) : actual.to_s == expected
+            end.sort_by { |identity| [identity.created_at, identity.id] }
+          end
+        end
+
         def identities_for_user(user_id)
           @monitor.synchronize do
             @identities.values

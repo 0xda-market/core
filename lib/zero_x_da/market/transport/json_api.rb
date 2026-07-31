@@ -2,6 +2,7 @@
 
 require_relative "bearer_auth"
 require_relative "json_api/endpoint_handler"
+require_relative "json_api/webapp_bootstrap"
 require_relative "json_api/external_identity_lookup"
 require_relative "json_api/error_mapper"
 require_relative "json_api/request_parser"

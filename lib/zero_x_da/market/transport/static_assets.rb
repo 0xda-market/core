@@ -7,6 +7,7 @@ module ZeroXDA
     module Transport
       class StaticAssets
         CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=3600"
+        METHOD_NOT_ALLOWED_BODY = "method not allowed\n"
 
         def initialize(root:, index:)
           @files = Rack::Files.new(File.expand_path(root))
@@ -27,7 +28,14 @@ module ZeroXDA
         private
 
         def method_not_allowed
-          [405, { "content-type" => "text/plain; charset=utf-8", "content-length" => "18" }, ["method not allowed\n"]]
+          [
+            405,
+            {
+              "content-type" => "text/plain; charset=utf-8",
+              "content-length" => METHOD_NOT_ALLOWED_BODY.bytesize.to_s
+            },
+            [METHOD_NOT_ALLOWED_BODY]
+          ]
         end
       end
     end

@@ -10,6 +10,7 @@ require_relative "lib/zero_x_da/market/adapters/postgres_manual_task_store"
 require_relative "lib/zero_x_da/market/providers/manual_provider"
 require_relative "lib/zero_x_da/market/transport/json_api"
 require_relative "lib/zero_x_da/market/transport/manual_api"
+require_relative "lib/zero_x_da/market/transport/static_assets"
 require_relative "lib/zero_x_da/market/identity/admin_service"
 require_relative "lib/zero_x_da/market/identity/memory_store"
 require_relative "lib/zero_x_da/market/identity/postgres_store"
@@ -117,7 +118,17 @@ public_api = ZeroXDA::Market::Transport::JSONAPI.new(
   localization: localization
 )
 
-applications = { "/" => public_api }
+applications = {
+  "/webapp-core" => ZeroXDA::Market::Transport::StaticAssets.new(
+    root: File.expand_path("webapp-core", __dir__),
+    index: "index.js"
+  ),
+  "/app" => ZeroXDA::Market::Transport::StaticAssets.new(
+    root: File.expand_path("webapp", __dir__),
+    index: "index.html"
+  ),
+  "/" => public_api
+}
 
 if manual_provider
   operator_api = ZeroXDA::Market::Transport::ManualAPI.new(

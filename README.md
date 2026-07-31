@@ -1,4 +1,4 @@
-# 0xda Market
+# 0xda-market Core
 
 Provider-agnostic execution and catalog core for turning a client intent into a
 quoted, accepted and fulfilled order.

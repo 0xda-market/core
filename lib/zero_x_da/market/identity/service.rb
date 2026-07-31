@@ -132,18 +132,30 @@ module ZeroXDA
 
         def lookup_identity(store, provider, selector)
           if selector.key?(:provider_user_id)
-            store.find_identity(
+            return store.find_identity(
               provider: provider,
               provider_user_id: selector.fetch(:provider_user_id)
             )
-          else
-            store.find_identity_by_provider_data(
-              provider: provider,
-              key: selector.fetch(:provider_data_key),
-              value: selector.fetch(:provider_data_value),
-              case_insensitive: selector.fetch(:case_insensitive)
-            )
           end
+
+          identities = store.identities_by_provider_data(
+            provider: provider,
+            key: selector.fetch(:provider_data_key),
+            value: selector.fetch(:provider_data_value),
+            case_insensitive: selector.fetch(:case_insensitive)
+          )
+          return identities.first if identities.length == 1
+          return nil if identities.empty?
+
+          raise Core::Conflict.new(
+            "external identity selector is ambiguous",
+            code: "ambiguous_external_identity",
+            details: {
+              provider: provider,
+              provider_data_key: selector.fetch(:provider_data_key),
+              matches: identities.length
+            }
+          )
         end
 
         def normalize_lookup_selector(

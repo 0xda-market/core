@@ -158,8 +158,39 @@ if [[ "$verify_public_https" == "1" ]]; then
     --retry-all-errors \
     --retry-delay 5 \
     "https://${domain}/bot/health" >/dev/null
+
+  bootstrap_file="$(mktemp)"
+  if ! curl \
+    --fail \
+    --silent \
+    --show-error \
+    --max-time 15 \
+    --retry 2 \
+    --retry-all-errors \
+    --retry-delay 2 \
+    "https://${domain}/v1/webapp/bootstrap?locale=en_US&currency=USDT" \
+    --output "$bootstrap_file"; then
+    echo "WebApp bootstrap did not complete within the deployment gate" >&2
+    docker compose logs --tail 200 api >&2 || true
+    rm -f "$bootstrap_file"
+    exit 1
+  fi
+
+  if ! jq -e '
+    .meta.complete == true and
+    .meta.pagination == "client" and
+    (.meta.count | type == "number") and
+    .meta.count == (.data | length)
+  ' "$bootstrap_file" >/dev/null; then
+    echo "WebApp bootstrap returned an invalid complete-snapshot contract" >&2
+    cat "$bootstrap_file" >&2
+    docker compose logs --tail 200 api >&2 || true
+    rm -f "$bootstrap_file"
+    exit 1
+  fi
+  rm -f "$bootstrap_file"
 fi
 
 docker image prune --force --filter 'until=168h' >/dev/null
 
-echo "0xda-market, 0xda-market-bot, and mcp-control are healthy on $deploy_environment"
+echo "0xda-market, 0xda-market-bot, mcp-control, and WebApp bootstrap are healthy on $deploy_environment"

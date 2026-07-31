@@ -5,6 +5,8 @@ import {
   pageSizeForViewport
 } from "/webapp-core/index.js";
 
+const CATALOG_BOOTSTRAP_TIMEOUT_MS = 15_000;
+
 const elements = {
   category: document.querySelector("#category"),
   dialog: document.querySelector("#product-dialog"),
@@ -32,13 +34,28 @@ async function loadCatalog() {
   bootstrapRequests += 1;
   if (bootstrapRequests > 1) throw new Error("catalog bootstrap must be requested exactly once");
 
-  const response = await fetch(
-    `/v1/webapp/bootstrap?${new URLSearchParams({ locale: locale(), currency: "USDT" })}`,
-    { headers: { accept: "application/json" } }
-  );
-  if (!response.ok) throw new Error(`catalog bootstrap failed with HTTP ${response.status}`);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), CATALOG_BOOTSTRAP_TIMEOUT_MS);
 
-  return createCatalogSnapshot(await response.json());
+  try {
+    const response = await fetch(
+      `/v1/webapp/bootstrap?${new URLSearchParams({ locale: locale(), currency: "USDT" })}`,
+      {
+        headers: { accept: "application/json" },
+        signal: controller.signal
+      }
+    );
+    if (!response.ok) throw new Error(`catalog bootstrap failed with HTTP ${response.status}`);
+
+    return createCatalogSnapshot(await response.json());
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("catalog bootstrap timed out after 15 seconds");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 function renderCategories(snapshot) {
@@ -104,24 +121,29 @@ async function start() {
 }
 
 elements.search.addEventListener("input", (event) => {
+  if (!store) return;
   store.setQuery(event.currentTarget.value);
   render();
 });
 elements.category.addEventListener("change", (event) => {
+  if (!store) return;
   store.setCategory(event.currentTarget.value);
   render();
 });
 elements.previous.addEventListener("click", () => {
+  if (!store) return;
   store.previous();
   render();
 });
 elements.home.addEventListener("click", () => {
+  if (!store) return;
   elements.category.value = "";
   store.setCategory(null);
   store.home();
   render();
 });
 elements.next.addEventListener("click", () => {
+  if (!store) return;
   store.next();
   render();
 });

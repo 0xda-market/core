@@ -1,0 +1,13 @@
+{
+  "name": "@0xda-market/webapp-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./index.js",
+  "scripts": {
+    "test": "node --test index.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

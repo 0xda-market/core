@@ -34,6 +34,16 @@ class WebAppBootstrapAPITest < Minitest::Test
     end
   end
 
+  class Localization
+    def locale_for(value)
+      value.to_s == "uk_UA" ? "uk_UA" : "en_US"
+    end
+
+    def supported_currency?(value)
+      value == "USDT"
+    end
+  end
+
   def setup
     now = Time.utc(2026, 7, 31, 17, 0, 0)
     product = ZeroXDA::Market::Catalog::Product.new(
@@ -64,7 +74,8 @@ class WebAppBootstrapAPITest < Minitest::Test
         kernel: Object.new,
         token: "protected-token",
         catalog: @catalog,
-        pricing: pricing
+        pricing: pricing,
+        localization: Localization.new
       )
     )
   end

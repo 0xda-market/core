@@ -20,6 +20,32 @@ class ManualProviderTest < Minitest::Test
     )
   end
 
+  def test_quote_expiry_is_visible_and_enforced_before_acceptance
+    provider = ZeroXDA::Market::Providers::ManualProvider.new(
+      key: "manual.expiring",
+      clock: @clock,
+      quote_ttl: 900
+    )
+    kernel, = build_kernel(
+      provider: provider,
+      clock: @clock,
+      capability: "manual.fulfillment"
+    )
+    intent = kernel.create_intent(
+      capability: "manual.fulfillment",
+      payload: { action: "purchase", sku: "premium_3m" }
+    )
+
+    quote = kernel.quote_intent(intent.id)
+
+    assert_equal @clock.call + 900, quote.expires_at
+    @clock.advance(901)
+    error = assert_raises(ZeroXDA::Market::Core::QuoteExpired) do
+      kernel.accept_quote(quote.id)
+    end
+    assert_equal "quote_expired", error.code
+  end
+
   def test_completes_an_order_through_an_operator_task
     intent = @kernel.create_intent(
       capability: "manual.fulfillment",

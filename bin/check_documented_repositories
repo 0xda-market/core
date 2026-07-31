@@ -2,6 +2,7 @@
 set -euo pipefail
 
 root="${1:-.}"
+organization="${DOCUMENTED_REPOSITORY_OWNER:-0xda-market}"
 
 mapfile -d '' files < <(
   find "$root" -type f \
@@ -19,16 +20,37 @@ if (( ${#files[@]} == 0 )); then
   exit 0
 fi
 
-mapfile -t repository_urls < <(
+mapfile -t documented_urls < <(
   grep -hEo 'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+' "${files[@]}" \
     | sed -E 's/[.,;:)>\]]+$//' \
     | sort -u
 )
 
-if (( ${#repository_urls[@]} == 0 )); then
+if (( ${#documented_urls[@]} == 0 )); then
   echo "no GitHub repository links found"
   exit 0
 fi
+
+declare -A renamed_repositories=(
+  ['0x0sky/0xda-market']='0xda-market/core'
+  ['0x0sky/0xda-market-bot']='0xda-market/telegram-bot'
+  ['0xda-market/0xda-market']='0xda-market/core'
+  ['0xda-market/0xda-market-bot']='0xda-market/telegram-bot'
+)
+
+failed=0
+repository_urls=()
+for repository_url in "${documented_urls[@]}"; do
+  slug="${repository_url#https://github.com/}"
+  if [[ -n "${renamed_repositories[$slug]:-}" ]]; then
+    echo "stale repository slug: ${slug}; use ${renamed_repositories[$slug]}" >&2
+    failed=1
+  fi
+
+  if [[ "$slug" == "${organization}/"* ]]; then
+    repository_urls+=("$repository_url")
+  fi
+done
 
 curl_headers=(
   --header 'Accept: application/vnd.github+json'
@@ -38,7 +60,6 @@ if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   curl_headers+=(--header "Authorization: Bearer ${GITHUB_TOKEN}")
 fi
 
-failed=0
 for repository_url in "${repository_urls[@]}"; do
   slug="${repository_url#https://github.com/}"
   api_url="https://api.github.com/repos/${slug}"
@@ -50,7 +71,7 @@ for repository_url in "${repository_urls[@]}"; do
   fi
 
   if [[ "$status" != '200' ]]; then
-    echo "repository link is not canonical or does not resolve: ${repository_url} (GitHub API HTTP ${status})" >&2
+    echo "organization repository link is not canonical or does not resolve: ${repository_url} (GitHub API HTTP ${status})" >&2
     failed=1
   fi
 done
@@ -59,4 +80,4 @@ if (( failed != 0 )); then
   exit 1
 fi
 
-echo "validated ${#repository_urls[@]} documented GitHub repository links"
+echo "validated ${#repository_urls[@]} ${organization} repository links and rejected legacy slugs"

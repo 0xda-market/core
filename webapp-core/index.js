@@ -194,6 +194,7 @@ export class CatalogStore {
 
 export class CheckoutController {
   #gateway;
+  #operationVersion = 0;
   #state = immutable({ status: "idle" });
 
   constructor(gateway) {
@@ -207,38 +208,61 @@ export class CheckoutController {
     return this.#state;
   }
 
+  reset(product = null) {
+    this.#operationVersion += 1;
+    this.#state = immutable(product ? { status: "idle", product } : { status: "idle" });
+    return this.#state;
+  }
+
   async quote(product) {
+    assert(product?.id, "a product is required before quoting");
+    const operation = ++this.#operationVersion;
     this.#state = immutable({ status: "quoting", product });
     try {
       const quote = await this.#gateway.quote(product.id);
-      this.#state = immutable({ status: "quoted", product, quote });
+      if (operation === this.#operationVersion) {
+        this.#state = immutable({ status: "quoted", product, quote });
+      }
     } catch (error) {
-      this.#state = immutable({ status: "failed", product, error: String(error.message ?? error) });
+      if (operation === this.#operationVersion) {
+        this.#state = immutable({ status: "failed", product, error: String(error.message ?? error) });
+      }
     }
     return this.#state;
   }
 
   async accept() {
     assert(this.#state.status === "quoted", "a quote must be loaded before acceptance");
+    const operation = ++this.#operationVersion;
     const { product, quote } = this.#state;
     this.#state = immutable({ status: "accepting", product, quote });
     try {
       const order = await this.#gateway.accept(quote.id);
-      this.#state = immutable({ status: order.attributes.status, product, quote, order });
+      if (operation === this.#operationVersion) {
+        this.#state = immutable({ status: order.attributes.status, product, quote, order });
+      }
     } catch (error) {
-      this.#state = immutable({ status: "failed", product, quote, error: String(error.message ?? error) });
+      if (operation === this.#operationVersion) {
+        this.#state = immutable({ status: "failed", product, quote, error: String(error.message ?? error) });
+      }
     }
     return this.#state;
   }
 
   async refresh() {
     assert(this.#state.order?.id, "an order must exist before refresh");
+    const operation = ++this.#operationVersion;
     const { product, quote, order } = this.#state;
+    this.#state = immutable({ status: "refreshing", product, quote, order });
     try {
       const refreshed = await this.#gateway.refresh(order.id);
-      this.#state = immutable({ status: refreshed.attributes.status, product, quote, order: refreshed });
+      if (operation === this.#operationVersion) {
+        this.#state = immutable({ status: refreshed.attributes.status, product, quote, order: refreshed });
+      }
     } catch (error) {
-      this.#state = immutable({ status: "failed", product, quote, order, error: String(error.message ?? error) });
+      if (operation === this.#operationVersion) {
+        this.#state = immutable({ status: "failed", product, quote, order, error: String(error.message ?? error) });
+      }
     }
     return this.#state;
   }

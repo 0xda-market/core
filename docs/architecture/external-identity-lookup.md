@@ -30,6 +30,8 @@ case_insensitive=true|false
 
 The response is one provider-neutral user profile containing the internal UUID, role, status and all linked external identities. Lookup does not enumerate active users and does not filter by user status. The subsequent privileged operation remains authoritative about whether the resolved user is eligible; for example, administrator assignment still rejects a blocked target.
 
+Provider-data fields are not required to be globally unique. If a selector matches more than one external identity, core fails closed with `ambiguous_external_identity` instead of choosing an arbitrary user. Channel adapters may then require a stable provider user ID.
+
 ## Boundary
 
 The channel adapter translates its user-facing reference into this generic lookup contract. It then sends the returned internal UUID to the existing operation, such as:

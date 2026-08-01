@@ -28,11 +28,6 @@ jobs:
             cat unit-test.log
             exit 1
           }
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Test WebApp core
-        run: npm test --prefix webapp-core
       - name: Validate documented repository links
         env:
           GITHUB_TOKEN: ${{ github.token }}

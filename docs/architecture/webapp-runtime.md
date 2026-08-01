@@ -1,62 +1,23 @@
 # WebApp runtime architecture
 
-The WebApp surface consists of three entities with one dependency direction:
+The WebApp surface has three peer repositories with one dependency direction:
 
 ```text
-webapp-core
-  ├─ standalone webapp
-  └─ telegram-bot/webapp
+telegram-bot/webapp -> webapp-core -> core JSON APIs
 ```
 
-`webapp-core` is a browser-native ES module. It owns snapshot validation, immutable catalog state, local search, local filtering, viewport page sizing, local pagination and the checkout state machine. It contains no Telegram SDK code, bot token, market API token, HTTP server or deployment logic.
+[webapp-core](https://github.com/0xda-market/webapp-core) owns the browser-native catalog engine, immutable snapshot state, local search and pagination, checkout state machine and reusable role-driven UI.
 
-The standalone WebApp lives under `webapp/` and is served at `/app/`. The Telegram Mini App is owned by `0xda-market/telegram-bot` and imports the same `/webapp-core/index.js` module.
+[telegram-bot](https://github.com/0xda-market/telegram-bot) owns the Telegram SDK host, signed `initData` transport, HTML/CSS shell, BFF and deployment entry point. It consumes an exact immutable `webapp-core` revision.
+
+`core` owns only provider-agnostic domain and backend contracts. It does not package or serve browser modules or a standalone WebApp.
 
 ## Complete snapshot contract
 
-`GET /v1/webapp/bootstrap` returns every active sellable product for one locale and presentation currency in a single response:
+`GET /v1/webapp/bootstrap` remains a core API and returns every active sellable product for one locale and presentation currency in a single response. Its `meta` contract includes `schema_version`, `snapshot_id`, `generated_at`, `count`, `complete: true`, `pagination: client`, `locale` and `currency`.
 
-```text
-open WebApp
-  -> one bootstrap request
-  -> immutable product snapshot
-  -> all page, category, search and viewport changes in memory
-```
+The public snapshot excludes internal audit identities. Browsing state is not settlement authority: quote, acceptance and order operations always revalidate current server state.
 
-The response meta contract is:
+## Delivery contract
 
-- `schema_version` — bootstrap schema version;
-- `snapshot_id` — SHA-256 of the complete product resource array;
-- `generated_at` — response creation time;
-- `count` — number of loaded products;
-- `complete: true` — no server-side continuation exists;
-- `pagination: client` — pages are array slices in `webapp-core`;
-- `locale` and `currency` — presentation context.
-
-The public snapshot excludes internal user UUIDs used for product and price auditing. Existing authenticated `/v1/products` behavior remains unchanged.
-
-## Pagination invariant
-
-A snapshot with 1,488 products and a portrait page size of six has 248 local pages. Moving from page one to page two or page three performs no HTTP request. Portrait uses six products per page; landscape uses twelve, or eighteen on wide landscape displays. Resizing preserves the first visible product.
-
-Network calls are allowed only for explicit lifecycle actions:
-
-```text
-select product locally
-  -> request current quote
-  -> explicit accept
-  -> create/execute order
-  -> explicit order refresh
-```
-
-Core revalidates product status, price, quote expiry and order ownership at those boundaries. The loaded snapshot is a browsing contract, not authority for settlement.
-
-## Static delivery
-
-The core runtime serves:
-
-- `/webapp-core/index.js` — shared browser engine;
-- `/app/` — standalone shell;
-- `/v1/webapp/bootstrap` — complete catalog snapshot.
-
-Assets are cacheable. Catalog bootstrap is intentionally a fresh snapshot request on WebApp opening; the browser does not request additional catalog pages afterward.
+Core serves JSON APIs only. Browser assets are released from `webapp-core` and mounted by a channel host. Production hosts must pin an immutable commit or released package version; default-branch URLs are not a supported dependency.

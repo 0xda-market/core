@@ -21,6 +21,9 @@ require_relative "lib/zero_x_da/market/pricing/memory_store"
 require_relative "lib/zero_x_da/market/pricing/postgres_store"
 require_relative "lib/zero_x_da/market/pricing/service"
 require_relative "lib/zero_x_da/market/localization/service"
+require_relative "lib/zero_x_da/market/listings/memory_store"
+require_relative "lib/zero_x_da/market/listings/postgres_store"
+require_relative "lib/zero_x_da/market/listings/service"
 
 clock = -> { Time.now.utc }
 environment = ENV.fetch("DEPLOY_ENV", "development")
@@ -106,6 +109,17 @@ admin_service = ZeroXDA::Market::Identity::AdminService.new(
   store: identity_store,
   clock: clock
 )
+listings_store = if database
+                   ZeroXDA::Market::Listings::PostgresStore.new(database: database)
+                 else
+                   ZeroXDA::Market::Listings::MemoryStore.new
+                 end
+listings = ZeroXDA::Market::Listings::Service.new(
+  store: listings_store,
+  users: identity_store,
+  catalog: catalog,
+  clock: clock
+)
 public_api = ZeroXDA::Market::Transport::JSONAPI.new(
   kernel: kernel,
   token: public_token,
@@ -114,7 +128,8 @@ public_api = ZeroXDA::Market::Transport::JSONAPI.new(
   admin_service: admin_service,
   catalog: catalog,
   pricing: pricing,
-  localization: localization
+  localization: localization,
+  listings: listings
 )
 
 applications = { "/" => public_api }

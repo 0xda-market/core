@@ -48,6 +48,7 @@ and enforced by architecture tests.
 - provider-neutral users and external identities;
 - internal-UUID administrator authorization;
 - localized product catalog and append-only price history;
+- broker-owned asset listings with exact quantity and price amounts;
 - PostgreSQL and in-memory adapters;
 - health-gated development VPS deployment with Caddy HTTPS and bot routing.
 
@@ -179,6 +180,17 @@ curl -sS 'http://localhost:9292/v1/products?locale=uk_UA' \
 curl -sS 'http://localhost:9292/v1/currencies?locale=uk_UA' \
   -H 'authorization: Bearer client-secret'
 ```
+
+## Broker asset listings
+
+Users with role `broker` or `admin` can publish one active listing per asset and
+quote currency. Listings store exact decimal quantity and unit price values,
+remain owned by the internal `market.users.id`, and use optimistic concurrency
+for edits and withdrawal. Telegram and other channel adapters authenticate the
+external user before calling this provider-neutral contract.
+
+The browser never receives database credentials or an internal user ID. It
+calls its signed host adapter, which supplies the verified actor ID to core.
 
 ## Manual fulfillment
 

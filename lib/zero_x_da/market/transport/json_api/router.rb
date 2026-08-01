@@ -71,6 +71,19 @@ module ZeroXDA
             if method == "POST" && path == "/v1/admin/users/set-admin" && available?(:assign_admin)
               return route(:assign_admin)
             end
+            if method == "GET" && path == "/v1/broker/listings" && available?(:broker_listings)
+              return route(:broker_listings)
+            end
+            if method == "POST" && path == "/v1/broker/listings" && available?(:broker_listings)
+              return route(:create_broker_listing)
+            end
+            listing_match = path.match(%r{\A/v1/broker/listings/([^/]+)\z})
+            if method == "PATCH" && listing_match && available?(:broker_listings)
+              return route(:update_broker_listing, id: listing_match[1])
+            end
+            if method == "DELETE" && listing_match && available?(:broker_listings)
+              return route(:withdraw_broker_listing, id: listing_match[1])
+            end
             return route(:create_intent) if method == "POST" && path == "/v1/intents"
 
             if method == "GET" && (match = path.match(%r{\A/v1/intents/([^/]+)\z}))

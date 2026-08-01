@@ -10,6 +10,9 @@ require "zero_x_da/market/identity/admin_service"
 require "zero_x_da/market/identity/postgres_store"
 require "zero_x_da/market/identity/service"
 require "zero_x_da/market/catalog/postgres_store"
+require "zero_x_da/market/catalog/service"
+require "zero_x_da/market/listings/postgres_store"
+require "zero_x_da/market/listings/service"
 
 class PostgresPersistenceTest < Minitest::Test
   DATABASE_URL = ENV["TEST_DATABASE_URL"]
@@ -21,6 +24,7 @@ class PostgresPersistenceTest < Minitest::Test
     migrate(@database)
     @database.connection.run(<<~SQL)
       TRUNCATE market.user_identities,
+               market.broker_listings,
                market.telegram_updates,
                market.telegram_brokers,
                market.telegram_demo_orders,
@@ -86,7 +90,7 @@ class PostgresPersistenceTest < Minitest::Test
         001_initial 002_telegram_demo 003_users_and_identities
         004_products 005_pricing 006_replace_premium_9m_with_12m
         007_product_catalog_localizations 008_legacy_catalog_rollback_window
-        009_currencies_as_products
+        009_currencies_as_products 010_broker_listings
       ],
       versions
     )
@@ -211,6 +215,48 @@ class PostgresPersistenceTest < Minitest::Test
     assert_equal first.user.id, second.user.id
     assert_equal first.identity.id, second.identity.id
     assert_equal "770", second.identity.provider_data.fetch("chat_id")
+  end
+
+  def test_broker_listings_survive_reconnection
+    clock = MutableClock.new
+    identifiers = [
+      "00000000-0000-4000-8000-000000000031",
+      "00000000-0000-4000-8000-000000000032",
+      "00000000-0000-4000-8000-000000000033"
+    ].each
+    users = ZeroXDA::Market::Identity::PostgresStore.new(database: @database)
+    identity = ZeroXDA::Market::Identity::Service.new(
+      store: users,
+      clock: clock,
+      id_generator: -> { identifiers.next }
+    )
+    broker = identity.authenticate(provider: "telegram", provider_user_id: 77, role: "broker").user
+    catalog = ZeroXDA::Market::Catalog::Service.new(
+      store: ZeroXDA::Market::Catalog::PostgresStore.new(database: @database)
+    )
+    service = ZeroXDA::Market::Listings::Service.new(
+      store: ZeroXDA::Market::Listings::PostgresStore.new(database: @database),
+      users: users,
+      catalog: catalog,
+      clock: clock,
+      id_generator: -> { identifiers.next }
+    )
+    listing = service.create(
+      actor_user_id: broker.id,
+      sku: "btc",
+      quantity: "0.25",
+      price_amount: "65000.12345678",
+      currency: "USDT"
+    )
+
+    @database.disconnect
+    @database = connect
+    restarted = ZeroXDA::Market::Listings::PostgresStore.new(database: @database)
+
+    persisted = restarted.find_listing(listing.id)
+    assert_equal BigDecimal("0.25"), persisted.quantity
+    assert_equal BigDecimal("65000.12345678"), persisted.price_amount
+    assert_equal broker.id, persisted.seller_user_id
   end
 
   def test_external_identity_auth_recovers_from_a_stale_pooled_connection

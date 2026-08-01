@@ -19,7 +19,8 @@ module ZeroXDA
             admin_service: nil,
             catalog: nil,
             pricing: nil,
-            localization: nil
+            localization: nil,
+            listings: nil
           )
             @kernel = kernel
             @readiness = readiness
@@ -29,6 +30,7 @@ module ZeroXDA
             @catalog = catalog
             @pricing = pricing
             @localization = localization
+            @listings = listings
           end
 
           def available?(endpoint)
@@ -41,6 +43,8 @@ module ZeroXDA
               !@pricing.nil? && !@admin_service.nil?
             when :assign_admin
               !@admin_service.nil?
+            when :broker_listings
+              !@listings.nil?
             else
               true
             end
@@ -144,6 +148,52 @@ module ZeroXDA
                 "meta" => { "count" => applied.length }
               }
             )
+          end
+
+          def broker_listings(request)
+            listings = @listings.list_owned(actor_user_id: request.params["actor_user_id"])
+            json_response(
+              200,
+              {
+                "data" => listings.map { |listing| present_listing(listing) },
+                "meta" => { "count" => listings.length }
+              }
+            )
+          end
+
+          def create_broker_listing(request)
+            body = @request_parser.request_document(request)
+            listing = @listings.create(
+              actor_user_id: body.fetch("actor_user_id"),
+              sku: body.fetch("sku"),
+              quantity: body.fetch("quantity"),
+              price_amount: body.fetch("price_amount"),
+              currency: body.fetch("currency")
+            )
+            resource_response(201, present_listing(listing))
+          end
+
+          def update_broker_listing(request, id:)
+            body = @request_parser.request_document(request)
+            listing = @listings.update(
+              actor_user_id: body.fetch("actor_user_id"),
+              listing_id: id,
+              quantity: body.fetch("quantity"),
+              price_amount: body.fetch("price_amount"),
+              currency: body.fetch("currency"),
+              expected_version: body.fetch("version")
+            )
+            resource_response(200, present_listing(listing))
+          end
+
+          def withdraw_broker_listing(request, id:)
+            body = @request_parser.request_document(request)
+            listing = @listings.withdraw(
+              actor_user_id: body.fetch("actor_user_id"),
+              listing_id: id,
+              expected_version: body.fetch("version")
+            )
+            resource_response(200, present_listing(listing))
           end
 
           def users(request)
@@ -354,6 +404,23 @@ module ZeroXDA
                 "current_applied_at" => current && timestamp(current.created_at),
                 "current_edited_by_user_id" => current&.set_by_user_id,
                 "previous_amount_usdt" => previous && decimal_string(previous.amount_usdt)
+              }
+            }
+          end
+
+          def present_listing(listing)
+            {
+              "type" => "broker_listing",
+              "id" => listing.id,
+              "attributes" => {
+                "sku" => listing.sku,
+                "quantity" => decimal_string(listing.quantity),
+                "price_amount" => decimal_string(listing.price_amount),
+                "currency" => listing.currency,
+                "status" => listing.status,
+                "created_at" => timestamp(listing.created_at),
+                "updated_at" => timestamp(listing.updated_at),
+                "version" => listing.version
               }
             }
           end

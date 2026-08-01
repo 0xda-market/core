@@ -20,7 +20,8 @@ module ZeroXDA
           admin_service: nil,
           catalog: nil,
           pricing: nil,
-          localization: nil
+          localization: nil,
+          listings: nil
         )
           error_mapper = ErrorMapper.new
           request_parser = RequestParser.new(localization: localization)
@@ -32,7 +33,8 @@ module ZeroXDA
             admin_service: admin_service,
             catalog: catalog,
             pricing: pricing,
-            localization: localization
+            localization: localization,
+            listings: listings
           )
           authentication = token && BearerAuth.new(token: token)
           @router = Router.new(

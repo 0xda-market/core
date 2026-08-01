@@ -29,7 +29,8 @@ Dependencies point inward:
 - stores implement persistence ports consumed by domain/application services;
 - external identity providers are represented by generic identity records;
 - concrete channels such as Telegram belong in dedicated adapter services;
-- `config.ru` is the composition root and does not mount channel webhooks.
+- browser UI and state live in the peer `0xda-market/webapp-core` repository;
+- `config.ru` is the composition root and serves backend APIs, not channel webhooks or browser assets.
 
 The detailed boundary contract is documented in
 [`docs/architecture/provider-boundaries.md`](docs/architecture/provider-boundaries.md)

@@ -41,8 +41,6 @@ COPY --from=build --chown=app:app /app/config ./config
 COPY --from=build --chown=app:app /app/lib ./lib
 COPY --from=build --chown=app:app /app/bin ./bin
 COPY --from=build --chown=app:app /app/db ./db
-COPY --from=build --chown=app:app /app/webapp-core ./webapp-core
-COPY --from=build --chown=app:app /app/webapp ./webapp
 
 USER app
 

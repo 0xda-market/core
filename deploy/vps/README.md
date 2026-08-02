@@ -80,8 +80,7 @@ Required secrets:
 Required variable:
 
 - `SSH_DEPLOYMENT_PATH=/opt/0xda-market`
-
-The SSH port is fixed to `22022` by the workflow. Do not add `SSH_PORT`.
+- `SSH_PORT=22022`
 
 ## Runtime file
 

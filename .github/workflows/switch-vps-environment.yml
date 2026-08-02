@@ -31,7 +31,7 @@ jobs:
       SSH_HOST: ${{ secrets.SSH_HOST }}
       SSH_USER: ${{ secrets.SSH_USER }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-      SSH_PORT: 22022
+      SSH_PORT: ${{ vars.SSH_PORT }}
       SSH_DEPLOYMENT_PATH: ${{ vars.SSH_DEPLOYMENT_PATH }}
       BOT_DEPLOY_PATH: /opt/0xda-market-bot
       VPS_RUNTIME_PATH: /opt/0xda-market-runtime
@@ -46,7 +46,7 @@ jobs:
             exit 1
           fi
           missing=0
-          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_DEPLOYMENT_PATH; do
+          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_DEPLOYMENT_PATH SSH_PORT; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::${name} is not configured for the ${TARGET_ENV} environment"
               missing=1

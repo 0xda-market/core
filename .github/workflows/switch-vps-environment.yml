@@ -32,7 +32,7 @@ jobs:
       SSH_USER: ${{ secrets.SSH_USER }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       SSH_PORT: 22022
-      SSH_DEPLOYMENT_PATH: ${{ secrets.SSH_DEPLOYMENT_PATH }}
+      SSH_DEPLOYMENT_PATH: ${{ vars.SSH_DEPLOYMENT_PATH }}
       BOT_DEPLOY_PATH: /opt/0xda-market-bot
       VPS_RUNTIME_PATH: /opt/0xda-market-runtime
 

@@ -7,6 +7,7 @@ require_relative "json_api/external_identity_lookup"
 require_relative "json_api/error_mapper"
 require_relative "json_api/request_parser"
 require_relative "json_api/router"
+require_relative "json_api/admin_catalog"
 
 module ZeroXDA
   module Market

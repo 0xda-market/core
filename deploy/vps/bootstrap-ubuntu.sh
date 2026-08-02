@@ -140,9 +140,9 @@ Use the same key in the development and production GitHub environments for:
   0xda-market/0xda-market-bot
 
 Each repository environment requires:
-  secret VPS_HOST=<public VPS IP>
-  secret VPS_USER=deploy
-  secret VPS_SSH_PRIVATE_KEY=<full private key>
+  variable SSH_HOST=<public VPS IP>
+  variable SSH_USER=deploy
+  secret SSH_PRIVATE_KEY=<full private key>
 
 Core variable:
   VPS_DEPLOY_PATH=/opt/0xda-market

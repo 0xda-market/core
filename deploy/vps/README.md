@@ -76,7 +76,10 @@ Required secrets:
 - `SSH_HOST`
 - `SSH_USER` (`deploy`)
 - `SSH_PRIVATE_KEY`
-- `SSH_DEPLOYMENT_PATH` (`/opt/0xda-market`)
+
+Required variable:
+
+- `SSH_DEPLOYMENT_PATH=/opt/0xda-market`
 
 The SSH port is fixed to `22022` by the workflow. Do not add `SSH_PORT`.
 

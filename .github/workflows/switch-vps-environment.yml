@@ -28,11 +28,11 @@ jobs:
     env:
       TARGET_ENV: ${{ inputs.target_environment }}
       CONFIRM_PRODUCTION: ${{ inputs.target_environment == 'production' && '1' || '0' }}
-      SSH_HOST: ${{ vars.SSH_HOST }}
-      SSH_USER: ${{ vars.SSH_USER }}
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       SSH_PORT: 22022
-      CORE_DEPLOY_PATH: ${{ vars.VPS_DEPLOY_PATH || '/opt/0xda-market' }}
+      SSH_DEPLOYMENT_PATH: ${{ secrets.SSH_DEPLOYMENT_PATH }}
       BOT_DEPLOY_PATH: /opt/0xda-market-bot
       VPS_RUNTIME_PATH: /opt/0xda-market-runtime
 
@@ -46,7 +46,7 @@ jobs:
             exit 1
           fi
           missing=0
-          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY; do
+          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_DEPLOYMENT_PATH; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::${name} is not configured for the ${TARGET_ENV} environment"
               missing=1
@@ -75,4 +75,4 @@ jobs:
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
-            "CORE_DEPLOY_PATH='$CORE_DEPLOY_PATH' BOT_DEPLOY_PATH='$BOT_DEPLOY_PATH' VPS_RUNTIME_PATH='$VPS_RUNTIME_PATH' CONFIRM_PRODUCTION='$CONFIRM_PRODUCTION' bash /tmp/0xda-market-switch-environment.sh '$TARGET_ENV'"
+            "CORE_DEPLOY_PATH='$SSH_DEPLOYMENT_PATH' BOT_DEPLOY_PATH='$BOT_DEPLOY_PATH' VPS_RUNTIME_PATH='$VPS_RUNTIME_PATH' CONFIRM_PRODUCTION='$CONFIRM_PRODUCTION' bash /tmp/0xda-market-switch-environment.sh '$TARGET_ENV'"

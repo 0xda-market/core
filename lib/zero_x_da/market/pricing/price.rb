@@ -10,7 +10,8 @@ module ZeroXDA
         SOURCES = %w[admin core].freeze
         MAX_AMOUNT = BigDecimal("1000000000")
 
-        attr_reader :sku,
+        attr_reader :id,
+                    :sku,
                     :amount_usdt,
                     :source,
                     :set_by_user_id,
@@ -21,8 +22,10 @@ module ZeroXDA
           amount_usdt:,
           source:,
           created_at:,
-          set_by_user_id: nil
+          set_by_user_id: nil,
+          id: nil
         )
+          @id = normalize_id(id)
           @sku = non_empty_string(sku, field: "sku")
           @amount_usdt = decimal(amount_usdt)
           raise ArgumentError, "price source is invalid" unless SOURCES.include?(source)
@@ -37,6 +40,17 @@ module ZeroXDA
         end
 
         private
+
+        def normalize_id(value)
+          return nil if value.nil?
+
+          integer = Integer(value)
+          raise ArgumentError, "price id must be positive" unless integer.positive?
+
+          integer
+        rescue ArgumentError, TypeError
+          raise ArgumentError, "price id must be a positive integer"
+        end
 
         def decimal(value)
           amount = case value

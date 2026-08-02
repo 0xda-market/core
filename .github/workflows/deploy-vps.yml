@@ -35,7 +35,7 @@ jobs:
       SSH_HOST: ${{ secrets.SSH_HOST }}
       SSH_USER: ${{ secrets.SSH_USER }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-      SSH_PORT: 22022
+      SSH_PORT: ${{ vars.SSH_PORT }}
       SSH_DEPLOYMENT_PATH: ${{ vars.SSH_DEPLOYMENT_PATH }}
       VPS_RUNTIME_PATH: /opt/0xda-market-runtime
       RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
@@ -48,7 +48,7 @@ jobs:
           test "$DEPLOY_ENV" = development
           case "$FORCE_ACTIVATE" in 0|1) ;; *) exit 1 ;; esac
           missing=0
-          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_DEPLOYMENT_PATH; do
+          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_DEPLOYMENT_PATH SSH_PORT; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::${name} is not configured for the development environment"
               missing=1

@@ -71,17 +71,20 @@ Production activation requires a separately reviewed release and compatible core
 
 ## GitHub environment
 
-Required secrets:
+Required variables:
 
-- `VPS_HOST`
-- `VPS_USER=deploy`
-- `VPS_SSH_PRIVATE_KEY`
+- `SSH_HOST`
+- `SSH_USER=deploy`
 
-Repository variables:
+Required secret:
+
+- `SSH_PRIVATE_KEY`
+
+Deployment variable:
 
 - `VPS_DEPLOY_PATH=/opt/0xda-market`
 
-The SSH port is fixed to `22022` by the workflow.
+The SSH port is fixed to `22022` by the workflow. Do not add `SSH_PORT`.
 
 ## Runtime file
 

@@ -134,9 +134,10 @@ class AdminCatalogTest < Minitest::Test
     document = JSON.parse(listing.body)
     assert_equal 1, document.dig("meta", "count")
     assert_equal 0, document.dig("data", 0, "attributes", "version")
-    assert_equal ["en_US"], document.dig("data", 0, "attributes", "localizations").map do |entry|
+    locales = document.dig("data", 0, "attributes", "localizations").map do |entry|
       entry.dig("attributes", "locale")
     end
+    assert_equal ["en_US"], locales
 
     update = request_json(
       client,

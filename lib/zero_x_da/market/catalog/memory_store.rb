@@ -106,6 +106,13 @@ module ZeroXDA
           normalized = normalize_locale(locale)
           translation = @localizations[[product.sku, normalized]] ||
                         @localizations[[product.sku, DEFAULT_LOCALE]]
+          if translation &&
+             translation.locale == product.locale &&
+             translation.full_name == product.name &&
+             translation.button_label == product.button_label
+            return product
+          end
+
           Product.new(
             sku: product.sku,
             short_name: product.short_name,

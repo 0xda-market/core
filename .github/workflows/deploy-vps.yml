@@ -36,7 +36,7 @@ jobs:
       SSH_USER: ${{ secrets.SSH_USER }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       SSH_PORT: 22022
-      SSH_DEPLOYMENT_PATH: ${{ secrets.SSH_DEPLOYMENT_PATH }}
+      SSH_DEPLOYMENT_PATH: ${{ vars.SSH_DEPLOYMENT_PATH }}
       VPS_RUNTIME_PATH: /opt/0xda-market-runtime
       RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
       MCP_CONTROL_REF: 2f9766ea6993716d2d79ad91a4ce40f18baa44ef

@@ -32,11 +32,11 @@ jobs:
     env:
       DEPLOY_ENV: development
       FORCE_ACTIVATE: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
-      SSH_HOST: ${{ vars.SSH_HOST }}
-      SSH_USER: ${{ vars.SSH_USER }}
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-      SSH_PORT: 22022
-      VPS_DEPLOY_PATH: ${{ vars.VPS_DEPLOY_PATH || '/opt/0xda-market' }}
+      SSH_PORT: ${{ vars.SSH_PORT }}
+      SSH_DEPLOYMENT_PATH: ${{ vars.SSH_DEPLOYMENT_PATH }}
       VPS_RUNTIME_PATH: /opt/0xda-market-runtime
       RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
       MCP_CONTROL_REF: 2f9766ea6993716d2d79ad91a4ce40f18baa44ef
@@ -48,14 +48,13 @@ jobs:
           test "$DEPLOY_ENV" = development
           case "$FORCE_ACTIVATE" in 0|1) ;; *) exit 1 ;; esac
           missing=0
-          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY; do
+          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_DEPLOYMENT_PATH SSH_PORT; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::${name} is not configured for the development environment"
               missing=1
             fi
           done
           test "$missing" -eq 0
-          test -n "$VPS_DEPLOY_PATH"
           test -n "$RELEASE_SHA"
           test -n "$MCP_CONTROL_REF"
 
@@ -141,7 +140,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
-            "DEPLOY_PATH='$VPS_DEPLOY_PATH' RUNTIME_PATH='$VPS_RUNTIME_PATH' DEPLOY_ENV='$DEPLOY_ENV' FORCE_ACTIVATE='$FORCE_ACTIVATE' RELEASE_SHA='$RELEASE_SHA' bash -s" <<'REMOTE'
+            "DEPLOY_PATH='$SSH_DEPLOYMENT_PATH' RUNTIME_PATH='$VPS_RUNTIME_PATH' DEPLOY_ENV='$DEPLOY_ENV' FORCE_ACTIVATE='$FORCE_ACTIVATE' RELEASE_SHA='$RELEASE_SHA' bash -s" <<'REMOTE'
           set -Eeuo pipefail
 
           environment_root="$DEPLOY_PATH/environments/$DEPLOY_ENV"

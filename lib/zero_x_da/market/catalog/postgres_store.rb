@@ -1,14 +1,15 @@
 # frozen_string_literal: true
 
 require "sequel"
+require_relative "../core/contracts"
 require_relative "product"
+require_relative "product_localization"
 
 module ZeroXDA
   module Market
     module Catalog
       class PostgresStore
         DEFAULT_LOCALE = "en_US"
-        SUPPORTED_LOCALES = %w[en_US uk_UA].freeze
 
         def initialize(database:)
           @products = database.connection[Sequel.qualify(:market, :products)]
@@ -19,10 +20,12 @@ module ZeroXDA
 
         # Defaults to the sellable catalog (marketable: true) to match the
         # legacy "list_products returns what you can sell" behavior. Pass
-        # marketable: false for currencies, or nil for both.
+        # marketable: false for currencies, or nil for both. Pass status: nil
+        # for the complete administrator catalog.
         def list_products(status:, locale: DEFAULT_LOCALE, marketable: true)
           locale = normalize_locale(locale)
-          scope = @products.where(status: status)
+          scope = @products
+          scope = scope.where(status: status) unless status.nil?
           scope = scope.where(marketable: marketable) unless marketable.nil?
           rows = scope.order(:position, :sku).all
           translations = translations_for(rows.map { |row| row.fetch(:sku) }, locale)
@@ -38,6 +41,68 @@ module ZeroXDA
 
           translation = translations_for([row.fetch(:sku)], locale).fetch(row.fetch(:sku))
           deserialize(row, locale: locale, translation: translation)
+        end
+
+        def list_localizations(sku)
+          @localizations.where(product_sku: sku.to_s)
+                        .order(:locale)
+                        .all
+                        .map { |row| deserialize_localization(row) }
+        end
+
+        def find_localization(sku, locale)
+          row = @localizations.where(
+            product_sku: sku.to_s,
+            locale: normalize_locale(locale)
+          ).first
+          row && deserialize_localization(row)
+        end
+
+        def replace_product(product, expected_version:)
+          count = @products.where(sku: product.sku, version: expected_version).update(
+            short_name: product.short_name,
+            metadata: Sequel.pg_jsonb(product.metadata),
+            status: product.status,
+            position: product.position,
+            marketable: product.marketable?,
+            updated_by_user_id: product.updated_by_user_id,
+            updated_at: product.updated_at,
+            version: product.version
+          )
+          return find_product(product.sku, locale: product.locale) if count == 1
+
+          raise Core::NotFound.new("product", product.sku) unless @products.where(sku: product.sku).get(:sku)
+
+          raise Core::ConcurrencyConflict.new("product", product.sku)
+        end
+
+        def save_localization(localization, expected_version:)
+          if expected_version.nil?
+            @localizations.insert(serialize_localization(localization))
+            return localization
+          end
+
+          count = @localizations.where(
+            product_sku: localization.product_sku,
+            locale: localization.locale,
+            version: expected_version
+          ).update(serialize_localization(localization))
+          return localization if count == 1
+
+          key = "#{localization.product_sku}:#{localization.locale}"
+          exists = @localizations.where(
+            product_sku: localization.product_sku,
+            locale: localization.locale
+          ).get(:product_sku)
+          raise Core::NotFound.new("product_localization", key) unless exists
+
+          raise Core::ConcurrencyConflict.new("product_localization", key)
+        rescue Sequel::UniqueConstraintViolation
+          raise Core::Conflict.new(
+            "product localization already exists",
+            code: "duplicate_localization",
+            details: { sku: localization.product_sku, locale: localization.locale }
+          )
         end
 
         private
@@ -70,8 +135,34 @@ module ZeroXDA
             marketable: row.fetch(:marketable, true),
             current_price_usdt: row.fetch(:current_price_usdt),
             price_updated_at: row.fetch(:price_updated_at),
-            price_updated_by_user_id: row.fetch(:price_updated_by_user_id),
-            updated_by_user_id: row.fetch(:updated_by_user_id),
+            price_updated_by_user_id: row.fetch(:price_updated_by_user_id)&.to_s,
+            updated_by_user_id: row.fetch(:updated_by_user_id)&.to_s,
+            created_at: row.fetch(:created_at),
+            updated_at: row.fetch(:updated_at),
+            version: row.fetch(:version)
+          )
+        end
+
+        def serialize_localization(localization)
+          {
+            product_sku: localization.product_sku,
+            locale: localization.locale,
+            full_name: localization.full_name,
+            button_label: localization.button_label,
+            updated_by_user_id: localization.updated_by_user_id,
+            created_at: localization.created_at,
+            updated_at: localization.updated_at,
+            version: localization.version
+          }
+        end
+
+        def deserialize_localization(row)
+          ProductLocalization.new(
+            product_sku: row.fetch(:product_sku),
+            locale: row.fetch(:locale),
+            full_name: row.fetch(:full_name),
+            button_label: row.fetch(:button_label),
+            updated_by_user_id: row.fetch(:updated_by_user_id)&.to_s,
             created_at: row.fetch(:created_at),
             updated_at: row.fetch(:updated_at),
             version: row.fetch(:version)
@@ -79,10 +170,12 @@ module ZeroXDA
         end
 
         def normalize_locale(value)
-          normalized = value.to_s.tr("-", "_")
+          normalized = value.to_s.strip.tr("-", "_")
+          return DEFAULT_LOCALE if normalized.empty?
           return "uk_UA" if normalized.downcase.start_with?("uk")
+          return "en_US" if normalized.downcase.start_with?("en")
 
-          SUPPORTED_LOCALES.include?(normalized) ? normalized : DEFAULT_LOCALE
+          Product::LOCALE_PATTERN.match?(normalized) ? normalized : DEFAULT_LOCALE
         end
 
         def document(value)

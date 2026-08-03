@@ -8,6 +8,7 @@ module ZeroXDA
     module Listings
       class Reservation
         STATUSES = %w[active committed released].freeze
+        CURRENCY_PATTERN = /\A[A-Z][A-Z0-9]{2,9}\z/
 
         attr_reader :id,
                     :listing_id,
@@ -15,6 +16,8 @@ module ZeroXDA
                     :quote_id,
                     :order_id,
                     :quantity,
+                    :supply_unit_price,
+                    :supply_currency,
                     :status,
                     :expires_at,
                     :created_at,
@@ -27,6 +30,8 @@ module ZeroXDA
           customer_user_id:,
           quote_id:,
           quantity:,
+          supply_unit_price:,
+          supply_currency:,
           expires_at:,
           order_id: nil,
           status: "active",
@@ -47,7 +52,10 @@ module ZeroXDA
           )
           @quote_id = Core::RecordSupport.identifier(quote_id.to_s, field: "quote id")
           @order_id = order_id && Core::RecordSupport.identifier(order_id.to_s, field: "order id")
-          @quantity = decimal(quantity)
+          @quantity = decimal(quantity, field: "reservation quantity", scale: 12)
+          @supply_unit_price = decimal(supply_unit_price, field: "supply unit price", scale: 8)
+          @supply_currency = supply_currency.to_s.upcase.freeze
+          raise ArgumentError, "supply currency is invalid" unless CURRENCY_PATTERN.match?(@supply_currency)
           @status = status.dup.freeze
           @expires_at = Core::RecordSupport.time(expires_at, field: "expires_at")
           @created_at = Core::RecordSupport.time(created_at, field: "created_at")
@@ -66,16 +74,16 @@ module ZeroXDA
 
         private
 
-        def decimal(value)
+        def decimal(value, field:, scale:)
           number = value.is_a?(BigDecimal) ? value : BigDecimal(value.to_s)
           maximum = BigDecimal("1e16")
-          unless number.finite? && number.positive? && number < maximum && number.round(12) == number
-            raise ArgumentError, "reservation quantity must be a positive decimal with at most 12 fractional digits"
+          unless number.finite? && number.positive? && number < maximum && number.round(scale) == number
+            raise ArgumentError, "#{field} must be a positive decimal with at most #{scale} fractional digits"
           end
 
           number
         rescue ArgumentError
-          raise ArgumentError, "reservation quantity must be a positive decimal with at most 12 fractional digits"
+          raise ArgumentError, "#{field} must be a positive decimal with at most #{scale} fractional digits"
         end
       end
     end

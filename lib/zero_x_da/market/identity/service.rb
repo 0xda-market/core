@@ -12,6 +12,7 @@ module ZeroXDA
         PROVIDER_DATA_KEY_PATTERN = /\A[a-zA-Z][a-zA-Z0-9._-]{0,63}\z/
         AUTHENTICATABLE_ROLES = %w[client broker].freeze
         ROLE_RANK = { "client" => 0, "broker" => 1, "admin" => 2 }.freeze
+        MAX_AUTHENTICATION_ATTEMPTS = 3
 
         def initialize(
           store:,
@@ -31,11 +32,11 @@ module ZeroXDA
           attempts = 0
 
           begin
+            attempts += 1
             authenticate_once(provider, provider_user_id, provider_data, role)
           rescue Core::Conflict => error
-            raise unless error.code == "duplicate_identity" && attempts.zero?
+            raise unless retryable_authentication_conflict?(error) && attempts < MAX_AUTHENTICATION_ATTEMPTS
 
-            attempts += 1
             retry
           end
         end
@@ -224,6 +225,14 @@ module ZeroXDA
             version: user.version + 1
           )
           store.replace_user(replacement, expected_version: user.version)
+        end
+
+        def retryable_authentication_conflict?(error)
+          return true if error.code == "duplicate_identity"
+          return false unless error.code == "concurrency_conflict"
+
+          resource = error.details["resource"] || error.details[:resource]
+          %w[user user_identity].include?(resource)
         end
 
         def normalize_provider(value)

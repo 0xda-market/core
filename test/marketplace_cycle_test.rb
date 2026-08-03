@@ -75,7 +75,7 @@ class MarketplaceCycleTest < Minitest::Test
     )
   end
 
-  def test_reserves_one_listing_and_commits_it_to_the_order
+  def test_keeps_inventory_reserved_until_payment_is_confirmed
     quoted = @marketplace.quote(
       customer_user_id: @client.id,
       sku: "premium_3m",
@@ -96,25 +96,45 @@ class MarketplaceCycleTest < Minitest::Test
       customer_user_id: @client.id,
       quote_id: quoted.quote.id
     )
-    assert_equal "accepted", accepted.order.status
-    assert_equal "committed", accepted.reservation.status
+    assert_equal "payment_pending", accepted.order.status
+    assert_equal "pending", accepted.order.payment.fetch("status")
+    assert_equal "12.5", accepted.order.payment.fetch("amount")
+    assert_equal "USDT", accepted.order.payment.fetch("currency")
+    assert_equal "payment_pending", accepted.reservation.status
+    pending_listing = @listings.list_owned(actor_user_id: @broker.id).fetch(0)
+    assert_equal BigDecimal("2"), pending_listing.available_quantity
+    assert_equal BigDecimal("1"), pending_listing.reserved_quantity
+    assert_equal BigDecimal("0"), pending_listing.sold_quantity
+
+    error = assert_raises(ZeroXDA::Market::Core::Conflict) do
+      @marketplace.execute_order(
+        customer_user_id: @client.id,
+        order_id: accepted.order.id
+      )
+    end
+    assert_equal "payment_required", error.code
+
+    confirmed = @marketplace.confirm_payment(
+      order_id: accepted.order.id,
+      reference: "payment-1",
+      data: { provider: "test" }
+    )
+    assert_equal "succeeded", confirmed.order.status
+    assert_equal "confirmed", confirmed.order.payment.fetch("status")
+    assert_equal "payment-1", confirmed.order.payment.fetch("reference")
+    assert_equal "committed", confirmed.reservation.status
     committed_listing = @listings.list_owned(actor_user_id: @broker.id).fetch(0)
     assert_equal BigDecimal("2"), committed_listing.available_quantity
     assert_equal BigDecimal("0"), committed_listing.reserved_quantity
     assert_equal BigDecimal("1"), committed_listing.sold_quantity
 
-    repeated = @marketplace.accept(
-      customer_user_id: @client.id,
-      quote_id: quoted.quote.id
+    repeated = @marketplace.confirm_payment(
+      order_id: accepted.order.id,
+      reference: "payment-1",
+      data: { provider: "test" }
     )
-    assert_equal accepted.order.id, repeated.order.id
+    assert_equal confirmed.order.id, repeated.order.id
     assert_equal BigDecimal("1"), @listings.list_owned(actor_user_id: @broker.id).fetch(0).sold_quantity
-
-    executed = @marketplace.execute_order(
-      customer_user_id: @client.id,
-      order_id: accepted.order.id
-    )
-    assert_equal "succeeded", executed.order.status
   end
 
   def test_rejects_overselling_and_releases_expired_quote_inventory
@@ -145,7 +165,7 @@ class MarketplaceCycleTest < Minitest::Test
     assert_equal BigDecimal("0"), released.reserved_quantity
   end
 
-  def test_marketplace_api_exposes_only_client_economics_and_inventory_state
+  def test_marketplace_api_exposes_payment_state_without_supply_economics
     api = ZeroXDA::Market::Transport::JSONAPI.new(
       kernel: @kernel,
       catalog: @catalog,
@@ -184,7 +204,14 @@ class MarketplaceCycleTest < Minitest::Test
     )
     assert_equal 201, order_response.status, order_response.body
     order_document = JSON.parse(order_response.body)
-    assert_equal "committed", order_document.dig("data", "attributes", "inventory_status")
+    order_attributes = order_document.dig("data", "attributes")
+    assert_equal "payment_pending", order_attributes.fetch("status")
+    assert_equal "payment_pending", order_attributes.fetch("inventory_status")
+    assert_equal "pending", order_attributes.fetch("payment_status")
+    assert_equal "12.5", order_attributes.dig("payment", "amount")
+    refute order_attributes.key?("seller_user_id")
+    refute order_attributes.key?("listing_id")
+    refute order_attributes.key?("supply_unit_price")
   end
 
   private

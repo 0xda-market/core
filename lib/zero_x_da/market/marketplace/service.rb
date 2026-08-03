@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "bigdecimal"
+require "time"
 require_relative "../core/contracts"
 
 module ZeroXDA
@@ -93,8 +94,24 @@ module ZeroXDA
 
         def accept(customer_user_id:, quote_id:)
           customer_id = normalized_customer_id(customer_user_id)
-          order = @kernel.accept_quote(quote_id)
-          reservation = @listings.commit(
+          reservation = @listings.reservation_for_quote(quote_id) ||
+                        raise(Core::NotFound.new("listing_reservation", quote_id))
+          ensure_owner!(reservation, customer_id)
+          quote = @kernel.find_quote(quote_id)
+          intent = @kernel.find_intent(quote.intent_id)
+          product = intent.payload.fetch("product")
+          order = @kernel.accept_quote(
+            quote_id,
+            initial_status: "payment_pending",
+            payment: {
+              "status" => "pending",
+              "amount" => product.fetch("total_price_usdt"),
+              "currency" => product.fetch("currency"),
+              "expires_at" => reservation.expires_at.iso8601(6),
+              "idempotency_key" => "quotes/#{quote_id}/payment"
+            }
+          )
+          reservation = @listings.await_payment(
             customer_user_id: customer_id,
             quote_id: quote_id,
             order_id: order.id
@@ -102,11 +119,42 @@ module ZeroXDA
           OrderResult.new(order: order, reservation: reservation)
         rescue StandardError
           begin
-            @kernel.cancel_order(order.id) if order&.status == "accepted"
+            if order && %w[accepted payment_pending].include?(order.status)
+              @kernel.cancel_order(order.id)
+            end
           rescue StandardError
             nil
           end
           raise
+        end
+
+        def confirm_payment(order_id:, reference:, data: {})
+          before = @kernel.find_order(order_id)
+          unless before.payment
+            raise Core::Conflict.new(
+              "order does not require marketplace payment confirmation",
+              code: "payment_not_required",
+              details: { order_id: order_id.to_s }
+            )
+          end
+
+          confirmed = @kernel.confirm_order_payment(
+            order_id,
+            reference: reference,
+            data: data
+          )
+          begin
+            reservation = @listings.commit_payment(order_id: order_id)
+          rescue StandardError => error
+            rollback_confirmed_payment(before, confirmed)
+            expire_failed_payment(order_id, error)
+            raise
+          end
+
+          OrderResult.new(
+            order: @kernel.execute_order(order_id),
+            reservation: reservation
+          )
         end
 
         def find_order(customer_user_id:, order_id:)
@@ -114,11 +162,21 @@ module ZeroXDA
           reservation = @listings.reservation_for_order(order_id) ||
                         raise(Core::NotFound.new("marketplace_order", order_id))
           ensure_owner!(reservation, customer_id)
-          OrderResult.new(order: @kernel.find_order(order_id), reservation: reservation)
+          order = @kernel.find_order(order_id)
+          order = @kernel.cancel_order(order.id) if reservation.status == "released" && order.status == "payment_pending"
+          OrderResult.new(order: order, reservation: reservation)
         end
 
         def execute_order(customer_user_id:, order_id:)
           current = find_order(customer_user_id: customer_user_id, order_id: order_id)
+          unless current.reservation.status == "committed" && payment_satisfied?(current.order)
+            raise Core::Conflict.new(
+              "payment confirmation is required before fulfillment",
+              code: "payment_required",
+              details: { order_id: current.order.id }
+            )
+          end
+
           OrderResult.new(
             order: @kernel.execute_order(current.order.id),
             reservation: current.reservation
@@ -126,13 +184,40 @@ module ZeroXDA
         end
 
         def release_quote(customer_user_id:, quote_id:)
-          @listings.release(
-            customer_user_id: normalized_customer_id(customer_user_id),
+          customer_id = normalized_customer_id(customer_user_id)
+          reservation = @listings.release(
+            customer_user_id: customer_id,
             quote_id: quote_id
           )
+          if reservation.order_id
+            order = @kernel.find_order(reservation.order_id)
+            @kernel.cancel_order(order.id) if order.status == "payment_pending"
+          end
+          reservation
         end
 
         private
+
+        def rollback_confirmed_payment(before, confirmed)
+          return unless before&.status == "payment_pending" && confirmed&.status == "accepted"
+
+          @kernel.rollback_order_payment(confirmed.id)
+        rescue StandardError
+          nil
+        end
+
+        def expire_failed_payment(order_id, error)
+          return unless error.respond_to?(:code) && error.code == "payment_expired"
+
+          order = @kernel.find_order(order_id)
+          @kernel.cancel_order(order.id) if order.status == "payment_pending"
+        rescue StandardError
+          nil
+        end
+
+        def payment_satisfied?(order)
+          order.payment.nil? || order.payment["status"] == "confirmed"
+        end
 
         def normalized_customer_id(value)
           Core::RecordSupport.identifier(value.to_s, field: "customer user id")

@@ -97,6 +97,7 @@ module ZeroXDA
               context: json(record.context),
               terms: json(record.terms),
               private_state: json(record.private_state),
+              payment: optional_json(record.payment),
               status: record.status,
               attempts: record.attempts,
               progress: optional_json(record.progress),

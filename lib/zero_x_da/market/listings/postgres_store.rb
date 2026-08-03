@@ -89,7 +89,7 @@ module ZeroXDA
         end
 
         def expired_reservations(at:)
-          @reservations.where(status: "active")
+          @reservations.where(status: %w[active payment_pending])
                        .where { expires_at <= at }
                        .order(:expires_at, :id)
                        .for_update

@@ -7,7 +7,7 @@ module ZeroXDA
   module Market
     module Listings
       class Reservation
-        STATUSES = %w[active committed released].freeze
+        STATUSES = %w[active payment_pending committed released].freeze
         CURRENCY_PATTERN = /\A[A-Z][A-Z0-9]{2,9}\z/
 
         attr_reader :id,
@@ -40,8 +40,8 @@ module ZeroXDA
           version: 0
         )
           raise ArgumentError, "reservation status is invalid" unless STATUSES.include?(status)
-          if status == "committed" && order_id.to_s.empty?
-            raise ArgumentError, "committed reservation requires an order id"
+          if %w[payment_pending committed].include?(status) && order_id.to_s.empty?
+            raise ArgumentError, "#{status.tr("_", "-")} reservation requires an order id"
           end
 
           @id = Core::RecordSupport.identifier(id.to_s, field: "reservation id")
@@ -68,8 +68,16 @@ module ZeroXDA
           status == "active"
         end
 
+        def payment_pending?
+          status == "payment_pending"
+        end
+
+        def reserving?
+          active? || payment_pending?
+        end
+
         def expired?(at:)
-          active? && at >= expires_at
+          reserving? && at >= expires_at
         end
 
         private

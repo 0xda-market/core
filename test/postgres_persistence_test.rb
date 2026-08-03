@@ -92,7 +92,7 @@ class PostgresPersistenceTest < Minitest::Test
         004_products 005_pricing 006_replace_premium_9m_with_12m
         007_product_catalog_localizations 008_legacy_catalog_rollback_window
         009_currencies_as_products 010_broker_listings
-        011_marketplace_inventory
+        011_marketplace_inventory 012_payment_aware_orders
       ],
       versions
     )

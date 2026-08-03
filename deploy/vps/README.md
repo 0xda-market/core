@@ -4,7 +4,7 @@ This directory deploys the provider-agnostic `0xda-market` application workloads
 
 The public edge is **not** part of this product deployment. Caddy, TLS state, public ports `80/443`, and host/path routing are owned by [`0x0sky/infra`](https://github.com/0x0sky/infra).
 
-The client bot is deployed independently from `0xda-market/0xda-market-bot`. Both workloads attach to the external Docker network `nilx-edge` and expose stable internal aliases consumed by the shared edge.
+The client bot is deployed independently from `0xda-market/telegram-bot`. Both workloads attach to the external Docker network `nilx-edge` and expose stable internal aliases consumed by the shared edge.
 
 ## Ownership boundary
 
@@ -29,13 +29,17 @@ A product deployment must never create, remove, or reconfigure the shared Caddy 
 
 ## Current deployment contract
 
-Automated deployment remains development-only:
+The repository has one `Deploy` workflow:
 
-| GitHub environment | Source branch | Runtime directory | Database |
-| --- | --- | --- | --- |
-| `development` | `master` | `environments/development` | test Supabase |
+| Invocation | Source | GitHub environment | Runtime directory | Database |
+| --- | --- | --- | --- | --- |
+| merged pull request into `master` | exact merge commit | `development` | `environments/development` | test Supabase |
+| manual dispatch | explicit branch, tag, or commit | `development` or `production` | matching environment directory | environment-owned |
 
-Production activation requires a separately reviewed release and compatible core/bot pair.
+Synchronizing an open pull request no longer creates a deployment run. Closing a
+pull request without merging skips the deploy job. A manual production deployment
+uses the protected `production` GitHub Environment and requires the compatible
+core/bot release pair, runtime configuration, and recovery plan.
 
 ## VPS layout
 
@@ -57,6 +61,10 @@ Production activation requires a separately reviewed release and compatible core
       current -> releases/<sha>
       releases/
       shared/.env
+    production/
+      current -> releases/<sha>
+      releases/
+      shared/.env
 
 /opt/infra/
   environments/
@@ -69,15 +77,15 @@ Production activation requires a separately reviewed release and compatible core
   active-environment
 ```
 
-## GitHub environment
+## GitHub environments
 
-Required secrets:
+Configure every available deployment environment with these secrets:
 
 - `SSH_HOST`
 - `SSH_USER` (`deploy`)
 - `SSH_PRIVATE_KEY`
 
-Required variable:
+And these variables:
 
 - `SSH_DEPLOYMENT_PATH=/opt/0xda-market`
 - `SSH_PORT=22022`
@@ -114,14 +122,26 @@ chmod 0600 /opt/0xda-market/environments/*/shared/.env
 
 ## Deployment behavior
 
-After green `CI`, a push to `master` stages or refreshes development.
+A merged pull request into `master` deploys its exact merge commit to
+`development`. Pull-request CI events are not deployment triggers.
+
+A manual run requires both:
+
+- `source_ref`: branch, tag, or commit to deploy;
+- `environment`: `development` or `production`.
+
+The selected reference is resolved to an immutable commit before upload. Automatic
+merge deployment stages development when it is inactive and refreshes it when it
+is active. Manual dispatch force-activates the explicitly selected environment.
+There is no separate environment-switch workflow.
 
 - staging builds and validates the release without changing the active stack;
 - activation requires `EDGE_OWNER=infra`;
 - only `api` and `mcp-control` belong to this Compose project;
 - `docker compose up --remove-orphans` cannot remove the standalone infra Caddy because it uses a different Compose project;
 - application health and public HTTPS remain deployment gates;
-- failed activation attempts to restore the previous application release.
+- failed activation attempts to restore the previous application release;
+- successful deployment publishes `deploy/vps-core-<environment>` on the exact release commit.
 
 The shared edge forwards:
 

@@ -55,7 +55,11 @@ jobs:
           ref: ${{ env.RELEASE_REF }}
 
       - name: Resolve immutable release
-        run: echo "RELEASE_SHA=$(git rev-parse HEAD)" >>"$GITHUB_ENV"
+        id: release
+        run: |
+          release_sha="$(git rev-parse HEAD)"
+          echo "sha=$release_sha" >>"$GITHUB_OUTPUT"
+          echo "RELEASE_SHA=$release_sha" >>"$GITHUB_ENV"
 
       - name: Validate deployment configuration
         run: |
@@ -200,7 +204,7 @@ jobs:
           REMOTE
 
       - name: Publish VPS deployment status
-        if: always() && env.RELEASE_SHA != ''
+        if: always() && steps.release.outputs.sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
           DEPLOY_STATE: ${{ job.status == 'success' && 'success' || 'failure' }}

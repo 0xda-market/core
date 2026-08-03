@@ -169,6 +169,81 @@ module ZeroXDA
           end
         end
 
+        def await_payment(customer_user_id:, quote_id:, order_id:)
+          customer = active_user(customer_user_id)
+          now = current_time
+          @store.transaction do |store|
+            reservation = store.find_reservation_by_quote(quote_id) ||
+                          raise(Core::NotFound.new("listing_reservation", quote_id))
+            ensure_reservation_owner!(reservation, customer)
+            if %w[payment_pending committed].include?(reservation.status)
+              if reservation.order_id == order_id.to_s
+                next reservation
+              end
+
+              raise Core::Conflict.new(
+                "reservation is already attached to another order",
+                code: "reservation_already_attached",
+                details: { quote_id: quote_id.to_s, order_id: reservation.order_id }
+              )
+            end
+            unless reservation.active?
+              raise Core::Conflict.new(
+                "reservation is not active",
+                code: "reservation_not_active",
+                details: { quote_id: quote_id.to_s }
+              )
+            end
+            if reservation.expired?(at: now)
+              release_reservation(store, reservation, now)
+              raise Core::Conflict.new(
+                "reservation has expired",
+                code: "reservation_expired",
+                details: { quote_id: quote_id.to_s }
+              )
+            end
+
+            store.replace_reservation(
+              rebuild_reservation(
+                reservation,
+                order_id: order_id,
+                status: "payment_pending",
+                updated_at: now,
+                version: reservation.version + 1
+              ),
+              expected_version: reservation.version
+            )
+          end
+        end
+
+        def commit_payment(order_id:)
+          now = current_time
+          @store.transaction do |store|
+            reservation = store.find_reservation_by_order(order_id) ||
+                          raise(Core::NotFound.new("listing_reservation", order_id))
+            next reservation if reservation.status == "committed"
+            unless reservation.payment_pending?
+              raise Core::Conflict.new(
+                "reservation is not waiting for payment",
+                code: "payment_not_pending",
+                details: { order_id: order_id.to_s, status: reservation.status }
+              )
+            end
+            if reservation.expired?(at: now)
+              release_reservation(store, reservation, now)
+              raise Core::Conflict.new(
+                "payment window has expired",
+                code: "payment_expired",
+                details: { order_id: order_id.to_s }
+              )
+            end
+
+            commit_inventory(store, reservation, now)
+          end
+        end
+
+        # Preserved for provider-neutral callers that intentionally commit inventory
+        # without the marketplace payment gate.
         def commit(customer_user_id:, quote_id:, order_id:)
           customer = active_user(customer_user_id)
           now = current_time
@@ -203,36 +278,16 @@ module ZeroXDA
               )
             end
 
-            listing = store.find_listing(reservation.listing_id) ||
-                      raise(Core::NotFound.new("broker_listing", reservation.listing_id))
-            if listing.reserved_quantity < reservation.quantity
-              raise Core::Conflict.new(
-                "reserved inventory is inconsistent",
-                code: "inventory_invariant_violation",
-                details: { listing_id: listing.id }
-              )
-            end
-
-            store.replace_listing(
-              rebuild_listing(
-                listing,
-                reserved_quantity: listing.reserved_quantity - reservation.quantity,
-                sold_quantity: listing.sold_quantity + reservation.quantity,
-                updated_at: now,
-                version: listing.version + 1
-              ),
-              expected_version: listing.version
-            )
-            store.replace_reservation(
+            reservation = store.replace_reservation(
               rebuild_reservation(
                 reservation,
                 order_id: order_id,
-                status: "committed",
                 updated_at: now,
                 version: reservation.version + 1
               ),
               expected_version: reservation.version
             )
+            commit_inventory(store, reservation, now)
           end
         end
 
@@ -242,7 +297,7 @@ module ZeroXDA
             reservation = store.find_reservation_by_quote(quote_id) ||
                           raise(Core::NotFound.new("listing_reservation", quote_id))
             ensure_reservation_owner!(reservation, customer)
-            reservation.active? ? release_reservation(store, reservation, current_time) : reservation
+            reservation.reserving? ? release_reservation(store, reservation, current_time) : reservation
           end
         end
 
@@ -321,8 +376,40 @@ module ZeroXDA
           end
         end
 
+        def commit_inventory(store, reservation, now)
+          listing = store.find_listing(reservation.listing_id) ||
+                    raise(Core::NotFound.new("broker_listing", reservation.listing_id))
+          if listing.reserved_quantity < reservation.quantity
+            raise Core::Conflict.new(
+              "reserved inventory is inconsistent",
+              code: "inventory_invariant_violation",
+              details: { listing_id: listing.id }
+            )
+          end
+
+          store.replace_listing(
+            rebuild_listing(
+              listing,
+              reserved_quantity: listing.reserved_quantity - reservation.quantity,
+              sold_quantity: listing.sold_quantity + reservation.quantity,
+              updated_at: now,
+              version: listing.version + 1
+            ),
+            expected_version: listing.version
+          )
+          store.replace_reservation(
+            rebuild_reservation(
+              reservation,
+              status: "committed",
+              updated_at: now,
+              version: reservation.version + 1
+            ),
+            expected_version: reservation.version
+          )
+        end
+
         def release_reservation(store, reservation, now)
-          return reservation unless reservation.active?
+          return reservation unless reservation.reserving?
 
           listing = store.find_listing(reservation.listing_id) ||
                     raise(Core::NotFound.new("broker_listing", reservation.listing_id))

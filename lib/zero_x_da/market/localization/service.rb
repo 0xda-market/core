@@ -53,13 +53,27 @@ module ZeroXDA
 
         def convert(amount_usdt:, currency:)
           normalized = normalize_currency(currency)
-          amount = amount_usdt.is_a?(BigDecimal) ? amount_usdt : BigDecimal(amount_usdt.to_s)
+          amount = decimal(amount_usdt, field: "amount_usdt")
           return amount if normalized == BASE_CURRENCY
 
           rate = rate_for(normalized)
           raise ArgumentError, "currency is not supported: #{normalized}" unless rate
 
           (amount / rate).round(DISPLAY_SCALE)
+        end
+
+        # Converts a broker-denominated supply amount into the canonical
+        # comparison unit used by allocation. The returned value is not a
+        # buyer-facing price and is retained only as an internal cost input.
+        def amount_usdt(amount:, currency:)
+          normalized = normalize_currency(currency)
+          value = decimal(amount, field: "amount")
+          return value if normalized == BASE_CURRENCY
+
+          rate = rate_for(normalized)
+          raise ArgumentError, "currency is not supported: #{normalized}" unless rate
+
+          (value * rate).round(8)
         end
 
         def supported_currency?(currency)
@@ -83,6 +97,15 @@ module ZeroXDA
         def normalize_currency(currency)
           value = currency.to_s.strip.upcase
           value.empty? ? BASE_CURRENCY : value
+        end
+
+        def decimal(value, field:)
+          number = value.is_a?(BigDecimal) ? value : BigDecimal(value.to_s)
+          raise ArgumentError, "#{field} must be a positive number" unless number.finite? && number.positive?
+
+          number
+        rescue ArgumentError
+          raise ArgumentError, "#{field} must be a positive number"
         end
       end
     end

@@ -44,6 +44,9 @@ class ListingsServiceTest < Minitest::Test
 
     assert_equal "btc", listing.sku
     assert_equal BigDecimal("0.125"), listing.quantity
+    assert_equal listing.quantity, listing.available_quantity
+    assert_equal BigDecimal("0"), listing.reserved_quantity
+    assert_equal BigDecimal("0"), listing.sold_quantity
     assert_equal BigDecimal("65000.12345678"), listing.price_amount
     assert_equal [listing], @service.list_owned(actor_user_id: @broker.id)
 
@@ -58,6 +61,7 @@ class ListingsServiceTest < Minitest::Test
     )
     assert_equal 1, updated.version
     assert_equal "UAH", updated.currency
+    assert_equal BigDecimal("0.25"), updated.available_quantity
 
     withdrawn = @service.withdraw(
       actor_user_id: @broker.id,
@@ -66,6 +70,68 @@ class ListingsServiceTest < Minitest::Test
     )
     assert_equal "withdrawn", withdrawn.status
     assert_empty @service.list_owned(actor_user_id: @broker.id)
+  end
+
+  def test_reserves_commits_and_releases_finite_inventory
+    listing = @service.create(
+      actor_user_id: @broker.id,
+      sku: "btc",
+      quantity: "3",
+      price_amount: "65000",
+      currency: "USDT"
+    )
+
+    reservation = @service.reserve(
+      customer_user_id: @client.id,
+      quote_id: "quote-1",
+      sku: "btc",
+      quantity: "1",
+      expires_at: @clock.call + 60
+    )
+    reserved = @service.list_owned(actor_user_id: @broker.id).fetch(0)
+    assert_equal listing.id, reservation.listing_id
+    assert_equal BigDecimal("2"), reserved.available_quantity
+    assert_equal BigDecimal("1"), reserved.reserved_quantity
+    assert_equal BigDecimal("0"), reserved.sold_quantity
+    assert_equal BigDecimal("65000"), reservation.supply_unit_price
+
+    committed = @service.commit(
+      customer_user_id: @client.id,
+      quote_id: "quote-1",
+      order_id: "order-1"
+    )
+    sold = @service.list_owned(actor_user_id: @broker.id).fetch(0)
+    assert_equal "committed", committed.status
+    assert_equal BigDecimal("2"), sold.available_quantity
+    assert_equal BigDecimal("0"), sold.reserved_quantity
+    assert_equal BigDecimal("1"), sold.sold_quantity
+
+    error = assert_raises(ZeroXDA::Market::Core::Conflict) do
+      @service.update(
+        actor_user_id: @broker.id,
+        listing_id: listing.id,
+        quantity: "0.5",
+        price_amount: "64000",
+        currency: "USDT",
+        expected_version: sold.version
+      )
+    end
+    assert_equal "inventory_already_committed", error.code
+
+    @service.reserve(
+      customer_user_id: @client.id,
+      quote_id: "quote-2",
+      sku: "btc",
+      quantity: "1",
+      expires_at: @clock.call + 30
+    )
+    @clock.advance(31)
+    assert_equal ["btc"], @service.available_skus
+    released = @service.list_owned(actor_user_id: @broker.id).fetch(0)
+    assert_equal BigDecimal("2"), released.available_quantity
+    assert_equal BigDecimal("0"), released.reserved_quantity
+    assert_equal BigDecimal("1"), released.sold_quantity
+    assert_equal "released", @service.reservation_for_quote("quote-2").status
   end
 
   def test_rejects_clients_and_cross_user_mutation

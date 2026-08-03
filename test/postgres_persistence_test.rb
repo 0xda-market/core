@@ -24,6 +24,7 @@ class PostgresPersistenceTest < Minitest::Test
     migrate(@database)
     @database.connection.run(<<~SQL)
       TRUNCATE market.user_identities,
+               market.listing_reservations,
                market.broker_listings,
                market.telegram_updates,
                market.telegram_brokers,
@@ -91,6 +92,7 @@ class PostgresPersistenceTest < Minitest::Test
         004_products 005_pricing 006_replace_premium_9m_with_12m
         007_product_catalog_localizations 008_legacy_catalog_rollback_window
         009_currencies_as_products 010_broker_listings
+        011_marketplace_inventory
       ],
       versions
     )
@@ -255,6 +257,9 @@ class PostgresPersistenceTest < Minitest::Test
 
     persisted = restarted.find_listing(listing.id)
     assert_equal BigDecimal("0.25"), persisted.quantity
+    assert_equal BigDecimal("0.25"), persisted.available_quantity
+    assert_equal BigDecimal("0"), persisted.reserved_quantity
+    assert_equal BigDecimal("0"), persisted.sold_quantity
     assert_equal BigDecimal("65000.12345678"), persisted.price_amount
     assert_equal broker.id, persisted.seller_user_id
   end

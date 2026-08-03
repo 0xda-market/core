@@ -9,6 +9,8 @@ require_relative "json_api/request_parser"
 require_relative "json_api/router"
 require_relative "json_api/admin_catalog"
 require_relative "json_api/admin_pricing"
+require_relative "json_api/marketplace"
+require_relative "json_api/liquidity_catalog"
 
 module ZeroXDA
   module Market
@@ -23,7 +25,8 @@ module ZeroXDA
           catalog: nil,
           pricing: nil,
           localization: nil,
-          listings: nil
+          listings: nil,
+          marketplace: nil
         )
           error_mapper = ErrorMapper.new
           request_parser = RequestParser.new(localization: localization)
@@ -36,7 +39,8 @@ module ZeroXDA
             catalog: catalog,
             pricing: pricing,
             localization: localization,
-            listings: listings
+            listings: listings,
+            marketplace: marketplace
           )
           authentication = token && BearerAuth.new(token: token)
           @router = Router.new(

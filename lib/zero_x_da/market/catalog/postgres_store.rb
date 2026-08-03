@@ -12,8 +12,9 @@ module ZeroXDA
         DEFAULT_LOCALE = "en_US"
 
         def initialize(database:)
-          @products = database.connection[Sequel.qualify(:market, :products)]
-          @localizations = database.connection[
+          @database = database.connection
+          @products = @database[Sequel.qualify(:market, :products)]
+          @localizations = @database[
             Sequel.qualify(:market, :product_localizations)
           ]
         end
@@ -56,6 +57,20 @@ module ZeroXDA
             locale: normalize_locale(locale)
           ).first
           row && deserialize_localization(row)
+        end
+
+        def insert_product(product, localization:)
+          @database.transaction do
+            @products.insert(serialize_product(product))
+            @localizations.insert(serialize_localization(localization))
+          end
+          find_product(product.sku, locale: localization.locale)
+        rescue Sequel::UniqueConstraintViolation
+          raise Core::Conflict.new(
+            "product already exists",
+            code: "duplicate_product",
+            details: { sku: product.sku }
+          )
         end
 
         def replace_product(product, expected_version:)
@@ -119,6 +134,24 @@ module ZeroXDA
             fallback = candidates.find { |row| row.fetch(:locale) == DEFAULT_LOCALE }
             [sku, requested || fallback || {}]
           end
+        end
+
+        def serialize_product(product)
+          {
+            sku: product.sku,
+            short_name: product.short_name,
+            metadata: Sequel.pg_jsonb(product.metadata),
+            status: product.status,
+            position: product.position,
+            marketable: product.marketable?,
+            current_price_usdt: product.current_price_usdt,
+            price_updated_at: product.price_updated_at,
+            price_updated_by_user_id: product.price_updated_by_user_id,
+            updated_by_user_id: product.updated_by_user_id,
+            created_at: product.created_at,
+            updated_at: product.updated_at,
+            version: product.version
+          }
         end
 
         def deserialize(row, locale:, translation:)

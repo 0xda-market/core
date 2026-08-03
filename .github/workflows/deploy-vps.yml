@@ -1,36 +1,45 @@
-name: Deploy API to VPS
+name: Deploy
 
 on:
-  workflow_run:
-    workflows:
-      - CI
+  pull_request:
+    branches:
+      - master
     types:
-      - completed
+      - closed
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag, or commit to deploy
+        required: true
+        default: master
+        type: string
+      environment:
+        description: GitHub and VPS environment
+        required: true
+        default: development
+        type: choice
+        options:
+          - development
+          - production
 
 permissions:
   contents: read
   statuses: write
 
 concurrency:
-  group: vps-api-development
+  group: vps-api-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'development' }}
   cancel-in-progress: false
 
 jobs:
   deploy:
-    if: >-
-      (github.event_name == 'workflow_dispatch' &&
-       github.ref == 'refs/heads/master') ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'master')
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
-      name: development
+      name: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'development' }}
     env:
-      DEPLOY_ENV: development
+      DEPLOY_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'development' }}
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.event.pull_request.merge_commit_sha }}
       FORCE_ACTIVATE: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
       SSH_HOST: ${{ secrets.SSH_HOST }}
       SSH_USER: ${{ secrets.SSH_USER }}
@@ -38,29 +47,40 @@ jobs:
       SSH_PORT: ${{ vars.SSH_PORT }}
       SSH_DEPLOYMENT_PATH: ${{ vars.SSH_DEPLOYMENT_PATH }}
       VPS_RUNTIME_PATH: /opt/0xda-market-runtime
-      RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
       MCP_CONTROL_REF: 2f9766ea6993716d2d79ad91a4ce40f18baa44ef
 
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+
+      - name: Resolve immutable release
+        id: release
+        run: |
+          release_sha="$(git rev-parse HEAD)"
+          echo "sha=$release_sha" >>"$GITHUB_OUTPUT"
+          echo "RELEASE_SHA=$release_sha" >>"$GITHUB_ENV"
+
       - name: Validate deployment configuration
         run: |
           set -Eeuo pipefail
-          test "$DEPLOY_ENV" = development
+          case "$DEPLOY_ENV" in development|production) ;; *) exit 1 ;; esac
           case "$FORCE_ACTIVATE" in 0|1) ;; *) exit 1 ;; esac
+          if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
+            test "$DEPLOY_ENV" = development
+            test "$FORCE_ACTIVATE" = 0
+          fi
           missing=0
           for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_DEPLOYMENT_PATH SSH_PORT; do
             if [[ -z "${!name:-}" ]]; then
-              echo "::error::${name} is not configured for the development environment"
+              echo "::error::${name} is not configured for the ${DEPLOY_ENV} environment"
               missing=1
             fi
           done
           test "$missing" -eq 0
+          test -n "$RELEASE_REF"
           test -n "$RELEASE_SHA"
           test -n "$MCP_CONTROL_REF"
-
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_SHA }}
 
       - name: Check out pinned mcp-control
         uses: actions/checkout@v4
@@ -136,7 +156,7 @@ jobs:
           tar --exclude=.git --exclude='.deps' --exclude='deploy/vps/.env' -czf "$archive" .
           scp -P "$SSH_PORT" "$archive" "$SSH_USER@$SSH_HOST:/tmp/"
 
-      - name: Stage or activate development
+      - name: Stage or activate environment
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
@@ -184,19 +204,19 @@ jobs:
           REMOTE
 
       - name: Publish VPS deployment status
-        if: always()
+        if: always() && steps.release.outputs.sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
           DEPLOY_STATE: ${{ job.status == 'success' && 'success' || 'failure' }}
         run: |
           set -Eeuo pipefail
-          description="three-workload VPS deployment failed"
+          description="core ${DEPLOY_ENV} VPS deployment failed"
           if [[ "$DEPLOY_STATE" == "success" ]]; then
-            description="core, bot, and mcp-control are healthy"
+            description="core ${DEPLOY_ENV} VPS deployment is healthy"
           fi
           payload="$(jq -nc \
             --arg state "$DEPLOY_STATE" \
-            --arg context "deploy/vps-stack-development" \
+            --arg context "deploy/vps-core-${DEPLOY_ENV}" \
             --arg description "$description" \
             --arg target_url "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
             '{state:$state,context:$context,description:$description,target_url:$target_url}')"

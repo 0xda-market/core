@@ -8,6 +8,7 @@ require_relative "json_api/error_mapper"
 require_relative "json_api/request_parser"
 require_relative "json_api/router"
 require_relative "json_api/admin_catalog"
+require_relative "json_api/admin_pricing"
 
 module ZeroXDA
   module Market

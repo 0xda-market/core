@@ -58,6 +58,9 @@ module ZeroXDA
             if method == "GET" && path == "/v1/admin/prices/proposal" && available?(:price_proposal)
               return route(:price_proposal)
             end
+            if method == "GET" && path == "/v1/admin/prices/history" && available?(:price_history)
+              return route(:price_history)
+            end
             if method == "POST" && path == "/v1/admin/prices" && available?(:apply_prices)
               return route(:apply_prices)
             end

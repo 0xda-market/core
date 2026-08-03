@@ -143,13 +143,18 @@ module ZeroXDA
             reference: reference,
             data: data
           )
-          reservation = @listings.commit_payment(order_id: order_id)
-          executed = @kernel.execute_order(order_id)
-          OrderResult.new(order: executed, reservation: reservation)
-        rescue StandardError => error
-          rollback_confirmed_payment(before, confirmed)
-          expire_failed_payment(order_id, error)
-          raise
+          begin
+            reservation = @listings.commit_payment(order_id: order_id)
+          rescue StandardError => error
+            rollback_confirmed_payment(before, confirmed)
+            expire_failed_payment(order_id, error)
+            raise
+          end
+
+          OrderResult.new(
+            order: @kernel.execute_order(order_id),
+            reservation: reservation
+          )
         end
 
         def find_order(customer_user_id:, order_id:)

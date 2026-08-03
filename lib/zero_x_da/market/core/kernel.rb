@@ -1,11 +1,14 @@
 # frozen_string_literal: true
 
+require "time"
 require_relative "contracts"
 
 module ZeroXDA
   module Market
     module Core
       class Kernel
+        INITIAL_ORDER_STATUSES = %w[accepted payment_pending].freeze
+
         def initialize(providers:, store:, clock:, id_generator:)
           @providers = providers.each_with_object({}) do |(capability, provider), copy|
             normalized = RecordSupport.capability(capability)
@@ -55,7 +58,11 @@ module ZeroXDA
           @store.fetch(:quotes, id)
         end
 
-        def accept_quote(id)
+        def accept_quote(id, initial_status: "accepted", payment: nil)
+          normalized_status = initial_order_status(initial_status)
+          if normalized_status == "payment_pending" && !payment.is_a?(Hash)
+            raise ArgumentError, "payment-pending orders require payment details"
+          end
           now = current_time
 
           @store.transaction do |store|
@@ -77,6 +84,8 @@ module ZeroXDA
               context: intent.context,
               terms: quote.terms,
               private_state: quote.private_state,
+              payment: payment,
+              status: normalized_status,
               created_at: now
             )
             store.insert(:orders, order)
@@ -85,6 +94,63 @@ module ZeroXDA
 
         def find_order(id)
           @store.fetch(:orders, id)
+        end
+
+        def confirm_order_payment(id, reference:, data: {})
+          payment_reference = RecordSupport.identifier(reference.to_s, field: "payment reference")
+          payment_data = RecordSupport.document(data, field: "payment data")
+          now = current_time
+
+          @store.transaction do |store|
+            order = store.fetch(:orders, id)
+            next order if payment_confirmed?(order)
+
+            ensure_status!(order, allowed: ["payment_pending"], event: "confirm_payment")
+            confirmed = rebuild_order(
+              order,
+              status: "accepted",
+              payment: order.payment.merge(
+                "status" => "confirmed",
+                "reference" => payment_reference,
+                "data" => payment_data,
+                "confirmed_at" => now.iso8601(6)
+              ),
+              updated_at: now,
+              version: order.version + 1
+            )
+            store.replace(:orders, confirmed, expected_version: order.version)
+          end
+        end
+
+        def rollback_order_payment(id)
+          now = current_time
+
+          @store.transaction do |store|
+            order = store.fetch(:orders, id)
+            next order if order.status == "payment_pending"
+
+            ensure_status!(order, allowed: ["accepted"], event: "rollback_payment")
+            unless order.attempts.zero? && payment_confirmed?(order)
+              raise InvalidTransition.new(
+                resource: "order",
+                id: order.id,
+                from: order.status,
+                event: "rollback_payment"
+              )
+            end
+
+            pending_payment = order.payment.reject do |key, _value|
+              %w[reference data confirmed_at].include?(key)
+            end.merge("status" => "pending")
+            reopened = rebuild_order(
+              order,
+              status: "payment_pending",
+              payment: pending_payment,
+              updated_at: now,
+              version: order.version + 1
+            )
+            store.replace(:orders, reopened, expected_version: order.version)
+          end
         end
 
         def execute_order(id)
@@ -133,7 +199,7 @@ module ZeroXDA
             order = store.fetch(:orders, id)
             next order if order.status == "cancelled"
 
-            ensure_status!(order, allowed: ["accepted"], event: "cancel")
+            ensure_status!(order, allowed: %w[accepted payment_pending], event: "cancel")
             cancelled = rebuild_order(
               order,
               status: "cancelled",
@@ -168,6 +234,7 @@ module ZeroXDA
               order,
               status: "processing",
               attempts: attempts,
+              progress: nil,
               result: nil,
               failure: nil,
               updated_at: now,
@@ -303,6 +370,17 @@ module ZeroXDA
           )
         end
 
+        def payment_confirmed?(order)
+          order.payment && order.payment["status"] == "confirmed"
+        end
+
+        def initial_order_status(value)
+          status = value.to_s
+          return status if INITIAL_ORDER_STATUSES.include?(status)
+
+          raise ArgumentError, "initial order status is invalid"
+        end
+
         def rebuild_order(order, **changes)
           attributes = {
             id: order.id,
@@ -314,6 +392,7 @@ module ZeroXDA
             context: order.context,
             terms: order.terms,
             private_state: order.private_state,
+            payment: order.payment,
             status: order.status,
             attempts: order.attempts,
             progress: order.progress,

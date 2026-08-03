@@ -24,8 +24,6 @@ module ZeroXDA
           keyword_init: true
         )
 
-        TERMINAL_STATUSES = %w[succeeded failed expired].freeze
-
         def initialize(kernel:, confirmation_client:, clock:, id_generator:)
           @kernel = kernel
           @confirmation_client = confirmation_client
@@ -56,11 +54,8 @@ module ZeroXDA
               )
             end
 
-            expires_at = Core::RecordSupport.optional_time(
-              payment.fetch("expires_at"),
-              field: "payment expires_at"
-            )
-            if expires_at && expires_at <= current_time
+            expires_at = parse_time(payment.fetch("expires_at"), field: "payment expires_at")
+            if expires_at <= current_time
               raise Core::Conflict.new(
                 "payment has expired",
                 code: "payment_expired",
@@ -79,7 +74,7 @@ module ZeroXDA
               currency: payment.fetch("currency").to_s,
               expires_at: expires_at,
               status: "pending",
-              data: {},
+              data: Core::RecordSupport.document({}, field: "payment data"),
               created_at: now,
               updated_at: now
             )
@@ -103,13 +98,16 @@ module ZeroXDA
 
           payment_reference = reference.to_s
           payment_reference = "mock/#{intent.id}" if payment_reference.empty?
-          confirmation = @confirmation_client.confirm(
-            order_id: intent.order_id,
-            reference: payment_reference,
-            data: payment_data.merge(
-              "provider" => "mock",
-              "payment_intent_id" => intent.id
-            )
+          confirmation = Core::RecordSupport.document(
+            @confirmation_client.confirm(
+              order_id: intent.order_id,
+              reference: payment_reference,
+              data: payment_data.merge(
+                "provider" => "mock",
+                "payment_intent_id" => intent.id
+              )
+            ),
+            field: "payment confirmation"
           )
 
           @monitor.synchronize do
@@ -135,11 +133,14 @@ module ZeroXDA
           transition_terminal(
             id,
             status: "failed",
-            failure: {
-              "code" => code.to_s,
-              "message" => message.to_s,
-              "details" => failure_details
-            }
+            failure: Core::RecordSupport.document(
+              {
+                "code" => code.to_s,
+                "message" => message.to_s,
+                "details" => failure_details
+              },
+              field: "payment failure"
+            )
           )
         end
 
@@ -147,11 +148,14 @@ module ZeroXDA
           transition_terminal(
             id,
             status: "expired",
-            failure: {
-              "code" => "mock_payment_expired",
-              "message" => "mock payment intent expired",
-              "details" => {}
-            }
+            failure: Core::RecordSupport.document(
+              {
+                "code" => "mock_payment_expired",
+                "message" => "mock payment intent expired",
+                "details" => {}
+              },
+              field: "payment failure"
+            )
           )
         end
 
@@ -168,15 +172,18 @@ module ZeroXDA
                 details: { id: intent.id, status: intent.status, event: "succeed" }
               )
             end
-            if intent.expires_at && intent.expires_at <= current_time
+            if intent.expires_at <= current_time
               expired = rebuild_intent(
                 intent,
                 status: "expired",
-                failure: {
-                  "code" => "mock_payment_expired",
-                  "message" => "mock payment intent expired",
-                  "details" => {}
-                },
+                failure: Core::RecordSupport.document(
+                  {
+                    "code" => "mock_payment_expired",
+                    "message" => "mock payment intent expired",
+                    "details" => {}
+                  },
+                  field: "payment failure"
+                ),
                 updated_at: current_time
               )
               @intents[intent.id] = expired
@@ -225,6 +232,14 @@ module ZeroXDA
               updated_at: current_time
             )
           end
+        end
+
+        def parse_time(value, field:)
+          return Core::RecordSupport.time(value, field: field) if value.is_a?(Time)
+
+          Core::RecordSupport.time(Time.iso8601(value.to_s), field: field)
+        rescue ArgumentError
+          raise ArgumentError, "#{field} must be an ISO 8601 timestamp"
         end
 
         def build_intent(**attributes)

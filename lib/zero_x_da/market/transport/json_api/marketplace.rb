@@ -5,6 +5,11 @@ module ZeroXDA
     module Transport
       class JSONAPI
         module MarketplaceEndpoints
+          def initialize(marketplace: nil, **options)
+            @marketplace = marketplace
+            super(**options)
+          end
+
           def available?(endpoint)
             return !@marketplace.nil? if endpoint == :marketplace
 

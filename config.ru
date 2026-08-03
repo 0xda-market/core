@@ -8,9 +8,12 @@ require_relative "lib/zero_x_da/market/adapters/postgres_database"
 require_relative "lib/zero_x_da/market/adapters/postgres_store"
 require_relative "lib/zero_x_da/market/adapters/postgres_manual_task_store"
 require_relative "lib/zero_x_da/market/providers/manual_provider"
+require_relative "lib/zero_x_da/market/payments/mock_provider"
+require_relative "lib/zero_x_da/market/payments/rack_confirmation_client"
 require_relative "lib/zero_x_da/market/transport/json_api"
 require_relative "lib/zero_x_da/market/transport/manual_api"
 require_relative "lib/zero_x_da/market/transport/manual_payment_confirmation"
+require_relative "lib/zero_x_da/market/transport/mock_payment_api"
 require_relative "lib/zero_x_da/market/identity/admin_service"
 require_relative "lib/zero_x_da/market/identity/memory_store"
 require_relative "lib/zero_x_da/market/identity/postgres_store"
@@ -32,10 +35,14 @@ environment = ENV.fetch("DEPLOY_ENV", "development")
 public_token = ENV["PUBLIC_API_TOKEN"]
 operator_token = ENV["MANUAL_PROVIDER_TOKEN"]
 database_url = ENV["DATABASE_URL"]
+mock_payment_enabled = ENV.fetch("ENABLE_MOCK_PAYMENT_PROVIDER", "0") == "1"
+mock_payment_token = ENV["MOCK_PAYMENT_PROVIDER_TOKEN"]
 manual_quote_ttl = Integer(ENV.fetch("MANUAL_QUOTE_TTL_SECONDS", "900"))
 raise "MANUAL_QUOTE_TTL_SECONDS must be positive" unless manual_quote_ttl.positive?
 
 if environment == "production"
+  raise "mock payment provider cannot be enabled in production" if mock_payment_enabled
+
   required_secrets = {
     "PUBLIC_API_TOKEN" => public_token,
     "MANUAL_PROVIDER_TOKEN" => operator_token,
@@ -46,6 +53,19 @@ if environment == "production"
   end
   unless missing.empty?
     raise "missing required production secrets: #{missing.join(", ")}"
+  end
+end
+
+if mock_payment_enabled
+  required_mock_secrets = {
+    "MANUAL_PROVIDER_TOKEN" => operator_token,
+    "MOCK_PAYMENT_PROVIDER_TOKEN" => mock_payment_token
+  }
+  missing = required_mock_secrets.filter_map do |name, value|
+    name if value.nil? || value.empty?
+  end
+  unless missing.empty?
+    raise "missing required mock payment secrets: #{missing.join(", ")}"
   end
 end
 
@@ -143,6 +163,7 @@ public_api = ZeroXDA::Market::Transport::JSONAPI.new(
 )
 
 applications = { "/" => public_api }
+operator_api = nil
 
 if manual_provider
   operator_api = ZeroXDA::Market::Transport::ManualAPI.new(
@@ -153,6 +174,23 @@ if manual_provider
     marketplace: marketplace
   )
   applications["/operator"] = operator_api
+end
+
+if mock_payment_enabled
+  confirmation_client = ZeroXDA::Market::Payments::RackConfirmationClient.new(
+    app: operator_api,
+    token: operator_token
+  )
+  mock_payment_provider = ZeroXDA::Market::Payments::MockProvider.new(
+    kernel: kernel,
+    confirmation_client: confirmation_client,
+    clock: clock,
+    id_generator: SecureRandom.method(:uuid)
+  )
+  applications["/mock-payments"] = ZeroXDA::Market::Transport::MockPaymentAPI.new(
+    provider: mock_payment_provider,
+    token: mock_payment_token
+  )
 end
 
 run Rack::URLMap.new(applications)

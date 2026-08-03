@@ -139,7 +139,7 @@ module ZeroXDA
       end
 
       class Order
-        STATUSES = %w[accepted processing pending succeeded failed cancelled].freeze
+        STATUSES = %w[payment_pending accepted processing pending succeeded failed cancelled].freeze
 
         attr_reader :id,
                     :intent_id,
@@ -150,6 +150,7 @@ module ZeroXDA
                     :context,
                     :terms,
                     :private_state,
+                    :payment,
                     :status,
                     :attempts,
                     :progress,
@@ -169,6 +170,7 @@ module ZeroXDA
           context: {},
           terms:,
           private_state: {},
+          payment: nil,
           status: "accepted",
           attempts: 0,
           progress: nil,
@@ -179,6 +181,9 @@ module ZeroXDA
           version: 0
         )
           raise ArgumentError, "status is invalid" unless STATUSES.include?(status)
+          if status == "payment_pending" && payment.nil?
+            raise ArgumentError, "payment-pending order requires payment details"
+          end
 
           @id = RecordSupport.identifier(id, field: "id")
           @intent_id = RecordSupport.identifier(intent_id, field: "intent_id")
@@ -189,6 +194,7 @@ module ZeroXDA
           @context = RecordSupport.document(context, field: "context")
           @terms = RecordSupport.document(terms, field: "terms")
           @private_state = RecordSupport.document(private_state, field: "private_state")
+          @payment = RecordSupport.optional_document(payment, field: "payment")
           @status = status.dup.freeze
           @attempts = RecordSupport.non_negative_integer(attempts, field: "attempts")
           @progress = RecordSupport.optional_document(progress, field: "progress")

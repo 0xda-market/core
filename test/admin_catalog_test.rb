@@ -29,6 +29,39 @@ class AdminCatalogTest < Minitest::Test
     @catalog = ZeroXDA::Market::Catalog::Service.new(store: @store, clock: @clock)
   end
 
+  def test_creates_an_inactive_product_and_initial_localization_atomically
+    product = @catalog.create_product(
+      sku: "premium_12m",
+      short_name: "Premium 12m",
+      full_name: "Telegram Premium 12 months",
+      button_label: "Premium · 12m",
+      actor_user_id: "admin-1",
+      position: 3,
+      metadata: { "family" => "telegram_premium", "duration_months" => 12 }
+    )
+
+    assert_equal "inactive", product.status
+    assert_equal "admin-1", product.updated_by_user_id
+    assert_equal ["premium_3m"], @catalog.products.map(&:sku)
+    assert_equal %w[premium_3m premium_12m], @catalog.admin_products.map(&:sku)
+    localization = @catalog.localizations("premium_12m").fetch(0)
+    assert_equal "en_US", localization.locale
+    assert_equal "Telegram Premium 12 months", localization.full_name
+
+    error = assert_raises(ZeroXDA::Market::Core::Conflict) do
+      @catalog.create_product(
+        sku: "premium_12m",
+        short_name: "Duplicate",
+        full_name: "Duplicate",
+        button_label: "Duplicate",
+        actor_user_id: "admin-1",
+        position: 4
+      )
+    end
+    assert_equal "duplicate_product", error.code
+    assert_equal 1, @catalog.localizations("premium_12m").length
+  end
+
   def test_updates_neutral_product_state_and_localizations_with_versions
     @clock.advance(10)
     updated = @catalog.update_product(
@@ -94,7 +127,7 @@ class AdminCatalogTest < Minitest::Test
     end
   end
 
-  def test_admin_api_lists_and_updates_products_without_trusting_the_browser_role
+  def test_admin_api_creates_lists_and_updates_products_without_trusting_the_browser_role
     identity_store = ZeroXDA::Market::Identity::MemoryStore.new
     identity_service = ZeroXDA::Market::Identity::Service.new(
       store: identity_store,
@@ -129,10 +162,47 @@ class AdminCatalogTest < Minitest::Test
     forbidden = client.get("/v1/admin/products?actor_user_id=#{ordinary_user.id}")
     assert_equal 403, forbidden.status
 
+    created = request_json(
+      client,
+      "POST",
+      "/v1/admin/products",
+      actor_user_id: administrator.id,
+      sku: "premium_12m",
+      attributes: {
+        short_name: "Premium 12m",
+        position: 3,
+        metadata: { family: "telegram_premium", duration_months: 12 }
+      },
+      localization: {
+        locale: "uk_UA",
+        full_name: "Telegram Premium на 12 місяців",
+        button_label: "Premium · 12 міс."
+      }
+    )
+    assert_equal 201, created.status, created.body
+    created_document = JSON.parse(created.body)
+    assert_equal "premium_12m", created_document.dig("data", "id")
+    assert_equal "inactive", created_document.dig("data", "attributes", "status")
+    assert_equal "uk_UA", created_document.dig(
+      "data", "attributes", "localizations", 0, "attributes", "locale"
+    )
+
+    duplicate = request_json(
+      client,
+      "POST",
+      "/v1/admin/products",
+      actor_user_id: administrator.id,
+      sku: "premium_12m",
+      attributes: { short_name: "Duplicate", position: 9 },
+      localization: { full_name: "Duplicate", button_label: "Duplicate" }
+    )
+    assert_equal 409, duplicate.status
+    assert_equal "duplicate_product", JSON.parse(duplicate.body).dig("errors", 0, "code")
+
     listing = client.get("/v1/admin/products?actor_user_id=#{administrator.id}&locale=en_US")
     assert_equal 200, listing.status, listing.body
     document = JSON.parse(listing.body)
-    assert_equal 1, document.dig("meta", "count")
+    assert_equal 2, document.dig("meta", "count")
     assert_equal 0, document.dig("data", 0, "attributes", "version")
     locales = document.dig("data", 0, "attributes", "localizations").map do |entry|
       entry.dig("attributes", "locale")

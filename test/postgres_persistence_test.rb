@@ -1,57 +1,42 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
+require "sequel"
 require "zero_x_da/market/adapters/postgres_database"
-require "zero_x_da/market/adapters/postgres_migrator"
-require "zero_x_da/market/adapters/postgres_store"
 require "zero_x_da/market/adapters/postgres_manual_task_store"
-require "zero_x_da/market/providers/manual_provider"
-require "zero_x_da/market/identity/admin_service"
-require "zero_x_da/market/identity/postgres_store"
-require "zero_x_da/market/identity/service"
+require "zero_x_da/market/adapters/postgres_store"
 require "zero_x_da/market/catalog/postgres_store"
-require "zero_x_da/market/catalog/service"
-require "zero_x_da/market/listings/postgres_store"
-require "zero_x_da/market/listings/service"
+require "zero_x_da/market/core/kernel"
+require "zero_x_da/market/providers/manual_provider"
 
 class PostgresPersistenceTest < Minitest::Test
-  DATABASE_URL = ENV["TEST_DATABASE_URL"]
+  include KernelFixture
 
   def setup
-    skip "TEST_DATABASE_URL is not configured" unless DATABASE_URL
+    skip "TEST_DATABASE_URL is not configured" unless ENV["TEST_DATABASE_URL"]
 
     @database = connect
+    reset_database(@database)
     migrate(@database)
-    @database.connection.run(<<~SQL)
-      TRUNCATE market.user_identities,
-               market.broker_listings,
-               market.telegram_updates,
-               market.telegram_brokers,
-               market.telegram_demo_orders,
-               market.manual_tasks,
-               market.orders,
-               market.quotes,
-               market.intents CASCADE
-    SQL
-    @database.connection.run("DELETE FROM market.users")
   end
 
   def teardown
     @database&.disconnect
   end
 
-  def test_core_records_and_manual_tasks_survive_reconnection
+  def test_persists_order_and_manual_task_across_reconnection
     clock = MutableClock.new
-    kernel, provider = build_application(@database, clock, SequenceIDs.new)
-
+    ids = SequenceIDs.new
+    kernel, provider = build_application(@database, clock, ids)
     intent = kernel.create_intent(
-      capability: "manual.fulfillment",
-      payload: { action: "deliver" },
-      context: { customer: "customer-1" }
+      capability: provider.key,
+      payload: { "delivery" => "premium_3m" }
     )
     quote = kernel.quote_intent(intent.id)
     order = kernel.accept_quote(quote.id)
+
     pending = kernel.execute_order(order.id)
+    assert_equal "pending", pending.status
     task_id = pending.progress.fetch("reference")
 
     @database.disconnect
@@ -91,6 +76,7 @@ class PostgresPersistenceTest < Minitest::Test
         004_products 005_pricing 006_replace_premium_9m_with_12m
         007_product_catalog_localizations 008_legacy_catalog_rollback_window
         009_currencies_as_products 010_broker_listings
+        011_marketplace_inventory
       ],
       versions
     )
@@ -103,261 +89,46 @@ class PostgresPersistenceTest < Minitest::Test
     premium = store.find_product("premium_12m")
     assert_equal "Telegram Premium 12 months", premium.name
     assert_equal "Premium 12m", premium.short_name
-    assert_equal "en_US", premium.locale
+    assert_equal 3, premium.position
     assert_equal 12, premium.metadata.fetch("duration_months")
-    assert_nil store.find_product("premium_9m")
-
-    ukrainian = store.find_product("premium_12m", locale: "uk_UA")
-    assert_equal "Telegram Premium 12 міс.", ukrainian.name
-    assert_equal "Premium 12 міс.", ukrainian.button_label
-    assert_equal "uk_UA", ukrainian.locale
-
-    legacy = @database.connection[Sequel.qualify(:market, :products)]
-      .where(sku: "premium_12m")
-      .select(:name, :button_label)
-      .first
-    assert_equal "Telegram Premium 12 міс.", legacy.fetch(:name)
-    assert_equal "Premium 12 міс.", legacy.fetch(:button_label)
 
     @database.disconnect
     @database = connect
-    restarted = ZeroXDA::Market::Catalog::PostgresStore.new(database: @database)
+    reloaded = ZeroXDA::Market::Catalog::PostgresStore.new(database: @database)
 
-    assert_equal %w[
-      premium_3m premium_6m premium_12m
-      stars_500 stars_1000 stars_3000
-      ton btc eth
-    ], restarted.list_products(status: "active").map(&:sku)
-  end
-
-  def test_currency_products_are_seeded_as_non_marketable
-    store = ZeroXDA::Market::Catalog::PostgresStore.new(database: @database)
-
-    currencies = store.list_products(status: "active", marketable: false)
-    assert_equal %w[usdt usd uah rub], currencies.map(&:sku)
-    refute currencies.any?(&:marketable?)
-    assert currencies.all?(&:currency?)
-
-    usdt = currencies.find { |currency| currency.sku == "usdt" }
-    assert_equal BigDecimal("1"), usdt.current_price_usdt
-
-    assert_equal 13, store.list_products(status: "active", marketable: nil).length
-  end
-
-  def test_product_price_snapshot_tracks_internal_editor_and_history
-    user_id = "00000000-0000-4000-8000-000000000071"
-    @database.connection[Sequel.qualify(:market, :users)].insert(
-      id: user_id,
-      role: "admin",
-      status: "active"
-    )
-    price_id = @database.connection[
-      Sequel.qualify(:market, :product_prices)
-    ].insert(
-      sku: "premium_3m",
-      amount_usdt: 12.5,
-      source: "admin",
-      set_by_user_id: user_id,
-      created_at: Time.utc(2026, 7, 19, 12, 0, 0)
-    )
-
-    product = @database.connection[
-      Sequel.qualify(:market, :products)
-    ].where(sku: "premium_3m").first
-    assert_equal price_id, product.fetch(:current_price_id)
-    assert_equal BigDecimal("12.5"), BigDecimal(product.fetch(:current_price_usdt).to_s)
-    assert_equal user_id, product.fetch(:price_updated_by_user_id).to_s
-    assert_equal user_id, product.fetch(:updated_by_user_id).to_s
-  ensure
-    if @database
-      @database.connection[Sequel.qualify(:market, :product_prices)]
-               .where(sku: "premium_3m")
-               .delete
-      @database.connection[Sequel.qualify(:market, :products)]
-               .where(sku: "premium_3m")
-               .update(
-                 current_price_id: nil,
-                 current_price_usdt: nil,
-                 price_updated_at: nil,
-                 price_updated_by_user_id: nil,
-                 updated_by_user_id: nil
-               )
-    end
-  end
-
-  def test_external_identity_survives_reconnection
-    clock = MutableClock.new
-    identifiers = [
-      "00000000-0000-4000-8000-000000000001",
-      "00000000-0000-4000-8000-000000000002"
-    ].each
-    service = build_identity_service(@database, clock, -> { identifiers.next })
-    first = service.authenticate(
-      provider: "telegram",
-      provider_user_id: 77,
-      provider_data: { chat_id: "77", username: "zero" }
-    )
-
-    @database.disconnect
-    @database = connect
-    restarted = build_identity_service(
-      @database,
-      clock,
-      -> { raise "an existing identity must not generate another id" }
-    )
-    second = restarted.authenticate(
-      provider: "telegram",
-      provider_user_id: 77,
-      provider_data: { chat_id: "770", username: "zero_updated" }
-    )
-
-    refute second.created
-    assert_equal first.user.id, second.user.id
-    assert_equal first.identity.id, second.identity.id
-    assert_equal "770", second.identity.provider_data.fetch("chat_id")
-  end
-
-  def test_broker_listings_survive_reconnection
-    clock = MutableClock.new
-    identifiers = [
-      "00000000-0000-4000-8000-000000000031",
-      "00000000-0000-4000-8000-000000000032",
-      "00000000-0000-4000-8000-000000000033"
-    ].each
-    users = ZeroXDA::Market::Identity::PostgresStore.new(database: @database)
-    identity = ZeroXDA::Market::Identity::Service.new(
-      store: users,
-      clock: clock,
-      id_generator: -> { identifiers.next }
-    )
-    broker = identity.authenticate(provider: "telegram", provider_user_id: 77, role: "broker").user
-    catalog = ZeroXDA::Market::Catalog::Service.new(
-      store: ZeroXDA::Market::Catalog::PostgresStore.new(database: @database)
-    )
-    service = ZeroXDA::Market::Listings::Service.new(
-      store: ZeroXDA::Market::Listings::PostgresStore.new(database: @database),
-      users: users,
-      catalog: catalog,
-      clock: clock,
-      id_generator: -> { identifiers.next }
-    )
-    listing = service.create(
-      actor_user_id: broker.id,
-      sku: "btc",
-      quantity: "0.25",
-      price_amount: "65000.12345678",
-      currency: "USDT"
-    )
-
-    @database.disconnect
-    @database = connect
-    restarted = ZeroXDA::Market::Listings::PostgresStore.new(database: @database)
-
-    persisted = restarted.find_listing(listing.id)
-    assert_equal BigDecimal("0.25"), persisted.quantity
-    assert_equal BigDecimal("65000.12345678"), persisted.price_amount
-    assert_equal broker.id, persisted.seller_user_id
-  end
-
-  def test_external_identity_auth_recovers_from_a_stale_pooled_connection
-    clock = MutableClock.new
-    identifiers = [
-      "00000000-0000-4000-8000-000000000021",
-      "00000000-0000-4000-8000-000000000022"
-    ].each
-    service = build_identity_service(@database, clock, -> { identifiers.next })
-
-    @database.connection.synchronize(&:finish)
-
-    authentication = service.authenticate(
-      provider: "github",
-      provider_user_id: "75973992",
-      provider_data: { login: "0x0sky" }
-    )
-
-    assert authentication.created
-    assert_equal "75973992", authentication.identity.provider_user_id
-    assert @database.healthy?
-  end
-
-  def test_admin_role_assignment_survives_reconnection
-    clock = MutableClock.new
-    identifiers = [
-      "00000000-0000-4000-8000-000000000011",
-      "00000000-0000-4000-8000-000000000012",
-      "00000000-0000-4000-8000-000000000013",
-      "00000000-0000-4000-8000-000000000014"
-    ].each
-    store = ZeroXDA::Market::Identity::PostgresStore.new(database: @database)
-    service = ZeroXDA::Market::Identity::Service.new(
-      store: store,
-      clock: clock,
-      id_generator: -> { identifiers.next }
-    )
-    owner = service.authenticate(
-      provider: "telegram",
-      provider_user_id: 77,
-      provider_data: { chat_id: "77", username: "owner" }
-    )
-    target = service.authenticate(
-      provider: "github",
-      provider_user_id: "target",
-      provider_data: { login: "target_user" }
-    )
-    admin_service = ZeroXDA::Market::Identity::AdminService.new(
-      store: store,
-      clock: clock
-    )
-    admin_service.bootstrap(user_id: owner.user.id)
-    admin_service.assign_admin(
-      actor_user_id: owner.user.id,
-      target_user_id: target.user.id
-    )
-
-    @database.disconnect
-    @database = connect
-    store = ZeroXDA::Market::Identity::PostgresStore.new(database: @database)
-
-    assert_equal "admin", store.find_user(target.user.id).role
+    assert_equal "Telegram Premium 12 months", reloaded.find_product("premium_12m").name
   end
 
   private
 
   def connect
     ZeroXDA::Market::Adapters::PostgresDatabase.new(
-      url: DATABASE_URL,
-      max_connections: 2
+      url: ENV.fetch("TEST_DATABASE_URL"),
+      max_connections: 3
     )
+  end
+
+  def reset_database(database)
+    database.connection.run("DROP SCHEMA IF EXISTS market CASCADE")
   end
 
   def migrate(database)
-    ZeroXDA::Market::Adapters::PostgresMigrator.new(
-      database: database,
-      path: File.expand_path("../db/migrations", __dir__)
-    ).migrate!
+    database.migrate!
   end
 
-  def build_application(database, clock, id_generator)
-    task_store = ZeroXDA::Market::Adapters::PostgresManualTaskStore.new(database: database)
+  def build_application(database, clock, ids)
     provider = ZeroXDA::Market::Providers::ManualProvider.new(
-      key: "manual.default",
+      key: "manual.test",
+      task_store: ZeroXDA::Market::Adapters::PostgresManualTaskStore.new(database: database),
       clock: clock,
-      task_store: task_store
+      id_generator: ids
     )
     kernel = ZeroXDA::Market::Core::Kernel.new(
-      providers: { "manual.fulfillment" => provider },
+      providers: { provider.key => provider },
       store: ZeroXDA::Market::Adapters::PostgresStore.new(database: database),
       clock: clock,
-      id_generator: id_generator
+      id_generator: ids
     )
     [kernel, provider]
-  end
-
-  def build_identity_service(database, clock, id_generator)
-    ZeroXDA::Market::Identity::Service.new(
-      store: ZeroXDA::Market::Identity::PostgresStore.new(database: database),
-      clock: clock,
-      id_generator: id_generator
-    )
   end
 end

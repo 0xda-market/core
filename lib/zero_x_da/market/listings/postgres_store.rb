@@ -34,13 +34,13 @@ module ZeroXDA
           scope.select_map(:sku).uniq.sort
         end
 
-        def find_eligible_listing(sku:, currency:, quantity:)
-          row = @listings.where(status: "active", sku: sku.to_s, currency: currency.to_s)
-                         .where { available_quantity >= quantity }
-                         .order(:price_amount, :created_at, :id)
-                         .for_update
-                         .first
-          row && deserialize(row)
+        def eligible_listings(sku:, quantity:)
+          @listings.where(status: "active", sku: sku.to_s)
+                   .where { available_quantity >= quantity }
+                   .order(:created_at, :id)
+                   .for_update
+                   .all
+                   .map { |row| deserialize(row) }
         end
 
         def find_listing(id)

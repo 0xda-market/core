@@ -9,19 +9,24 @@ module ZeroXDA
       class MemoryStore
         def initialize
           @listings = {}
+          @reservations = {}
           @monitor = Monitor.new
         end
 
         def transaction
           @monitor.synchronize do
-            snapshot = @listings.dup
+            listings_snapshot = @listings.dup
+            reservations_snapshot = @reservations.dup
             committed = false
             begin
               result = yield self
               committed = true
               result
             ensure
-              @listings = snapshot unless committed
+              unless committed
+                @listings = listings_snapshot
+                @reservations = reservations_snapshot
+              end
             end
           end
         end
@@ -32,6 +37,30 @@ module ZeroXDA
                      .select { |listing| listing.seller_user_id == seller_user_id.to_s && listing.status == status }
                      .sort_by { |listing| [listing.updated_at, listing.id] }
                      .reverse
+          end
+        end
+
+        def available_skus(currency: nil)
+          @monitor.synchronize do
+            @listings.values
+                     .select do |listing|
+                       listing.status == "active" && listing.available_quantity.positive? &&
+                         (currency.nil? || listing.currency == currency)
+                     end
+                     .map(&:sku)
+                     .uniq
+                     .sort
+          end
+        end
+
+        def find_eligible_listing(sku:, currency:, quantity:)
+          @monitor.synchronize do
+            @listings.values
+                     .select do |listing|
+                       listing.status == "active" && listing.sku == sku.to_s &&
+                         listing.currency == currency.to_s && listing.available_quantity >= quantity
+                     end
+                     .min_by { |listing| [listing.price_amount, listing.created_at, listing.id] }
           end
         end
 
@@ -61,6 +90,53 @@ module ZeroXDA
             @listings[listing.id] = listing
           end
           listing
+        end
+
+        def insert_reservation(reservation)
+          @monitor.synchronize do
+            if @reservations.key?(reservation.id) ||
+               @reservations.values.any? { |current| current.quote_id == reservation.quote_id }
+              raise Core::Conflict.new(
+                "listing reservation already exists",
+                code: "duplicate_reservation",
+                details: { quote_id: reservation.quote_id }
+              )
+            end
+
+            @reservations[reservation.id] = reservation
+          end
+          reservation
+        end
+
+        def find_reservation_by_quote(quote_id)
+          @monitor.synchronize do
+            @reservations.values.find { |reservation| reservation.quote_id == quote_id.to_s }
+          end
+        end
+
+        def find_reservation_by_order(order_id)
+          @monitor.synchronize do
+            @reservations.values.find { |reservation| reservation.order_id == order_id.to_s }
+          end
+        end
+
+        def expired_reservations(at:)
+          @monitor.synchronize do
+            @reservations.values.select { |reservation| reservation.expired?(at: at) }
+          end
+        end
+
+        def replace_reservation(reservation, expected_version:)
+          @monitor.synchronize do
+            current = @reservations[reservation.id]
+            raise Core::NotFound.new("listing_reservation", reservation.id) unless current
+            unless current.version == expected_version
+              raise Core::ConcurrencyConflict.new("listing_reservation", reservation.id)
+            end
+
+            @reservations[reservation.id] = reservation
+          end
+          reservation
         end
 
         private

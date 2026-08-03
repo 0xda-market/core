@@ -167,9 +167,13 @@ class MarketplaceCycleTest < Minitest::Test
     assert_equal 201, quote_response.status, quote_response.body
     quote_document = JSON.parse(quote_response.body)
     quote_id = quote_document.dig("data", "id")
-    assert_equal "12.5", quote_document.dig("data", "attributes", "total_price_usdt")
-    assert_equal "active", quote_document.dig("data", "attributes", "inventory_status")
-    refute_includes quote_response.body, @broker.id
+    attributes = quote_document.dig("data", "attributes")
+    assert_equal "12.5", attributes.fetch("total_price_usdt")
+    assert_equal "active", attributes.fetch("inventory_status")
+    refute attributes.key?("seller_user_id")
+    refute attributes.key?("listing_id")
+    refute attributes.key?("supply_unit_price")
+    refute attributes.key?("supply_currency")
     refute_includes quote_response.body, "9.25"
 
     order_response = request_json(

@@ -25,6 +25,8 @@ CREATE TABLE market.listing_reservations (
   quote_id text NOT NULL UNIQUE,
   order_id text UNIQUE,
   quantity numeric(28, 12) NOT NULL CHECK (quantity > 0),
+  supply_unit_price numeric(28, 8) NOT NULL CHECK (supply_unit_price > 0),
+  supply_currency text NOT NULL CHECK (supply_currency ~ '^[A-Z][A-Z0-9]{2,9}$'),
   status text NOT NULL DEFAULT 'active'
     CHECK (status IN ('active', 'committed', 'released')),
   expires_at timestamptz NOT NULL,

@@ -63,6 +63,31 @@ module ZeroXDA
           @monitor.synchronize { @localizations[[sku.to_s, normalize_locale(locale)]] }
         end
 
+        def insert_product(product, localization:)
+          @monitor.synchronize do
+            if @products.key?(product.sku)
+              raise Core::Conflict.new(
+                "product already exists",
+                code: "duplicate_product",
+                details: { sku: product.sku }
+              )
+            end
+
+            localization_key = [localization.product_sku, localization.locale]
+            if @localizations.key?(localization_key)
+              raise Core::Conflict.new(
+                "product localization already exists",
+                code: "duplicate_localization",
+                details: { sku: localization.product_sku, locale: localization.locale }
+              )
+            end
+
+            @products[product.sku] = product
+            @localizations[localization_key] = localization
+            product
+          end
+        end
+
         def replace_product(product, expected_version:)
           @monitor.synchronize do
             current = @products[product.sku]

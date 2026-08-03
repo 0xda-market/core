@@ -24,6 +24,29 @@ module ZeroXDA
             )
           end
 
+          def create_admin_product(request)
+            body = @request_parser.request_document(request)
+            actor = @admin_service.require_admin(user_id: body.fetch("actor_user_id"))
+            attributes = body.fetch("attributes")
+            localization = body.fetch("localization")
+            raise ArgumentError, "attributes must be an object" unless attributes.is_a?(Hash)
+            raise ArgumentError, "localization must be an object" unless localization.is_a?(Hash)
+
+            product = @catalog.create_product(
+              sku: body.fetch("sku"),
+              short_name: attributes.fetch("short_name"),
+              status: attributes.fetch("status", "inactive"),
+              position: attributes.fetch("position"),
+              marketable: attributes.fetch("marketable", true),
+              metadata: attributes.fetch("metadata", {}),
+              locale: localization.fetch("locale", "en_US"),
+              full_name: localization.fetch("full_name"),
+              button_label: localization.fetch("button_label"),
+              actor_user_id: actor.id
+            )
+            resource_response(201, present_admin_product(product))
+          end
+
           def update_admin_product(request, sku:)
             body = @request_parser.request_document(request)
             actor = @admin_service.require_admin(user_id: body.fetch("actor_user_id"))
@@ -92,8 +115,9 @@ module ZeroXDA
             method = request.request_method
             path = request.path_info
 
-            if method == "GET" && path == "/v1/admin/products" && available?(:admin_products)
-              return route(:admin_products)
+            if path == "/v1/admin/products" && available?(:admin_products)
+              return route(:admin_products) if method == "GET"
+              return route(:create_admin_product) if method == "POST"
             end
 
             product_match = path.match(%r{\A/v1/admin/products/([^/]+)\z})

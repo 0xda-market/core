@@ -10,6 +10,7 @@ require_relative "lib/zero_x_da/market/adapters/postgres_manual_task_store"
 require_relative "lib/zero_x_da/market/providers/manual_provider"
 require_relative "lib/zero_x_da/market/transport/json_api"
 require_relative "lib/zero_x_da/market/transport/manual_api"
+require_relative "lib/zero_x_da/market/transport/manual_payment_confirmation"
 require_relative "lib/zero_x_da/market/identity/admin_service"
 require_relative "lib/zero_x_da/market/identity/memory_store"
 require_relative "lib/zero_x_da/market/identity/postgres_store"
@@ -148,7 +149,8 @@ if manual_provider
     provider: manual_provider,
     token: operator_token,
     identity_service: identity_service,
-    catalog: catalog
+    catalog: catalog,
+    marketplace: marketplace
   )
   applications["/operator"] = operator_api
 end

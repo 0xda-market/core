@@ -53,14 +53,12 @@ module ZeroXDA
           end
         end
 
-        def find_eligible_listing(sku:, currency:, quantity:)
+        def eligible_listings(sku:, quantity:)
           @monitor.synchronize do
-            @listings.values
-                     .select do |listing|
-                       listing.status == "active" && listing.sku == sku.to_s &&
-                         listing.currency == currency.to_s && listing.available_quantity >= quantity
-                     end
-                     .min_by { |listing| [listing.price_amount, listing.created_at, listing.id] }
+            @listings.values.select do |listing|
+              listing.status == "active" && listing.sku == sku.to_s &&
+                listing.available_quantity >= quantity
+            end
           end
         end
 

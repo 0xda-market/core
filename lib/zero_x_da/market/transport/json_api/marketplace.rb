@@ -72,7 +72,9 @@ module ZeroXDA
             resource = present_order(result.order)
             resource.fetch("attributes").merge!(
               "quantity" => decimal_string(result.reservation.quantity),
-              "inventory_status" => result.reservation.status
+              "inventory_status" => result.reservation.status,
+              "payment_status" => result.order.payment&.fetch("status", nil) || "not_required",
+              "payment" => result.order.payment
             )
             resource
           end

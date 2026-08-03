@@ -42,6 +42,44 @@ module ZeroXDA
           @store.list_localizations(sku.to_s)
         end
 
+        def create_product(
+          sku:,
+          short_name:,
+          full_name:,
+          button_label:,
+          locale: DEFAULT_LOCALE,
+          actor_user_id:,
+          position:,
+          metadata: {},
+          status: "inactive",
+          marketable: true
+        )
+          normalized_locale = normalize_locale(locale)
+          now = @clock.call
+          product = Product.new(
+            sku: sku,
+            short_name: short_name,
+            name: full_name,
+            button_label: button_label,
+            locale: normalized_locale,
+            metadata: metadata,
+            status: status,
+            position: position,
+            marketable: marketable,
+            updated_by_user_id: actor_user_id,
+            created_at: now
+          )
+          localization = ProductLocalization.new(
+            product_sku: product.sku,
+            locale: normalized_locale,
+            full_name: full_name,
+            button_label: button_label,
+            updated_by_user_id: actor_user_id,
+            created_at: now
+          )
+          @store.insert_product(product, localization: localization)
+        end
+
         def update_product(sku:, actor_user_id:, expected_version:, attributes:)
           raise ArgumentError, "attributes must be an object" unless attributes.is_a?(Hash)
 

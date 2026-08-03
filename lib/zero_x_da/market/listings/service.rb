@@ -151,6 +151,8 @@ module ZeroXDA
                 customer_user_id: customer.id,
                 quote_id: quote_id,
                 quantity: requested_quantity,
+                supply_unit_price: listing.price_amount,
+                supply_currency: listing.currency,
                 expires_at: expiration,
                 created_at: now
               )
@@ -364,6 +366,8 @@ module ZeroXDA
             quote_id: reservation.quote_id,
             order_id: reservation.order_id,
             quantity: reservation.quantity,
+            supply_unit_price: reservation.supply_unit_price,
+            supply_currency: reservation.supply_currency,
             status: reservation.status,
             expires_at: reservation.expires_at,
             created_at: reservation.created_at,

@@ -12,10 +12,18 @@ module ZeroXDA
       class Service
         SELLER_ROLES = %w[broker admin].freeze
 
-        def initialize(store:, users:, catalog:, clock: -> { Time.now.utc }, id_generator: SecureRandom.method(:uuid))
+        def initialize(
+          store:,
+          users:,
+          catalog:,
+          localization: nil,
+          clock: -> { Time.now.utc },
+          id_generator: SecureRandom.method(:uuid)
+        )
           @store = store
           @users = users
           @catalog = catalog
+          @localization = localization
           @clock = clock
           @id_generator = id_generator
         end
@@ -98,10 +106,10 @@ module ZeroXDA
           end
         end
 
-        def reserve(customer_user_id:, quote_id:, sku:, quantity:, currency:, expires_at:)
+        def reserve(customer_user_id:, quote_id:, sku:, quantity:, expires_at:, currency: nil)
           customer = active_user(customer_user_id)
           product = marketable_product(sku)
-          normalized_currency = currency_code(currency)
+          normalized_currency = currency && currency_code(currency)
           requested_quantity = quantity_value(quantity)
           expiration = Core::RecordSupport.time(expires_at, field: "reservation expires_at")
           now = current_time
@@ -119,11 +127,12 @@ module ZeroXDA
               )
             end
 
-            listing = store.find_eligible_listing(
-              sku: product.sku,
-              currency: normalized_currency,
-              quantity: requested_quantity
-            )
+            candidates = store.eligible_listings(sku: product.sku, quantity: requested_quantity)
+            candidates = candidates.select { |entry| entry.currency == normalized_currency } if normalized_currency
+            listing = candidates.filter_map do |entry|
+              cost = normalized_supply_cost(entry)
+              cost && [entry, cost]
+            end.min_by { |entry, cost| [cost, entry.created_at, entry.id] }&.first
             unless listing
               raise Core::Conflict.new(
                 "insufficient broker liquidity",
@@ -132,7 +141,7 @@ module ZeroXDA
                   sku: product.sku,
                   quantity: requested_quantity.to_s("F"),
                   currency: normalized_currency
-                }
+                }.compact
               )
             end
 
@@ -276,6 +285,13 @@ module ZeroXDA
           raise ArgumentError, "currency is unavailable" unless currency
 
           code
+        end
+
+        def normalized_supply_cost(listing)
+          return listing.price_amount if listing.currency == "USDT"
+          return nil unless @localization&.supported_currency?(listing.currency)
+
+          @localization.amount_usdt(amount: listing.price_amount, currency: listing.currency)
         end
 
         def owned_listing(store, actor, listing_id)

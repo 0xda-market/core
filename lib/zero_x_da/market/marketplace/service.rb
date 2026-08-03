@@ -169,8 +169,7 @@ module ZeroXDA
 
         def execute_order(customer_user_id:, order_id:)
           current = find_order(customer_user_id: customer_user_id, order_id: order_id)
-          unless current.reservation.status == "committed" &&
-                 current.order.payment && current.order.payment["status"] == "confirmed"
+          unless current.reservation.status == "committed" && payment_satisfied?(current.order)
             raise Core::Conflict.new(
               "payment confirmation is required before fulfillment",
               code: "payment_required",
@@ -214,6 +213,10 @@ module ZeroXDA
           @kernel.cancel_order(order.id) if order.status == "payment_pending"
         rescue StandardError
           nil
+        end
+
+        def payment_satisfied?(order)
+          order.payment.nil? || order.payment["status"] == "confirmed"
         end
 
         def normalized_customer_id(value)

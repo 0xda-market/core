@@ -14,7 +14,14 @@ telegram-bot/webapp -> webapp-core -> core JSON APIs
 
 ## Complete snapshot contract
 
-`GET /v1/webapp/bootstrap` remains a core API and returns every active sellable product for one locale and presentation currency in a single response. Its `meta` contract includes `schema_version`, `snapshot_id`, `generated_at`, `count`, `complete: true`, `pagination: client`, `locale` and `currency`.
+`GET /v1/webapp/bootstrap` remains a core API and returns every active sellable product for one locale and presentation currency in a single response. Its `meta` contract includes `schema_version`, `snapshot_id`, `generated_at`, `count`, `available_count`, `complete: true`, `pagination: client`, `locale` and `currency`.
+
+A product is buyer-available only when both conditions hold at snapshot generation time:
+
+- an applied client price exists;
+- at least one active broker listing has available inventory.
+
+The snapshot emits `attributes.available` explicitly and omits the public price when either condition is false. Broker identity, supply price and inventory allocation details remain private. Quote creation still revalidates price and liquidity transactionally, so the snapshot is presentation state rather than settlement authority.
 
 The public snapshot excludes internal audit identities. Browsing state is not settlement authority: quote, acceptance and order operations always revalidate current server state.
 

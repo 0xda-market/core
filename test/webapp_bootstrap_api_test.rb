@@ -34,6 +34,16 @@ class WebAppBootstrapAPITest < Minitest::Test
     end
   end
 
+  class Listings
+    def initialize(available_skus)
+      @available_skus = available_skus
+    end
+
+    def available_skus
+      @available_skus
+    end
+  end
+
   class Localization
     def locale_for(value)
       value.to_s == "uk_UA" ? "uk_UA" : "en_US"
@@ -67,7 +77,7 @@ class WebAppBootstrapAPITest < Minitest::Test
       created_at: now
     )
     @catalog = Catalog.new([product])
-    pricing = Pricing.new(
+    @pricing = Pricing.new(
       "premium_3m" => Price.new(
         amount_usdt: BigDecimal("13.25"),
         source: "admin",
@@ -75,15 +85,9 @@ class WebAppBootstrapAPITest < Minitest::Test
         created_at: now
       )
     )
-    @client = Rack::MockRequest.new(
-      ZeroXDA::Market::Transport::JSONAPI.new(
-        kernel: Object.new,
-        token: "protected-token",
-        catalog: @catalog,
-        pricing: pricing,
-        localization: Localization.new
-      )
-    )
+    @localization = Localization.new
+    @listings = Listings.new(["premium_3m"])
+    @client = build_client
   end
 
   def test_returns_the_complete_catalog_without_server_pagination
@@ -94,16 +98,40 @@ class WebAppBootstrapAPITest < Minitest::Test
     assert_equal true, document.dig("meta", "complete")
     assert_equal "client", document.dig("meta", "pagination")
     assert_equal 1, document.dig("meta", "count")
+    assert_equal 1, document.dig("meta", "available_count")
     assert_equal "uk_UA", document.dig("meta", "locale")
     assert_equal "USDT", document.dig("meta", "currency")
 
     product = document.fetch("data").first
     assert_equal "premium_3m", product.fetch("id")
+    assert_equal true, product.dig("attributes", "available")
     assert_equal "13.25", product.dig("attributes", "price", "amount")
     refute product.fetch("attributes").key?("updated_by_user_id")
     refute product.fetch("attributes").key?("price_updated_by_user_id")
     refute product.dig("attributes", "price").key?("edited_by_user_id")
     assert_equal ["uk_UA"], @catalog.locales
+  end
+
+  def test_hides_a_client_price_without_active_broker_liquidity
+    client = build_client(listings: Listings.new([]))
+
+    document = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
+    product = document.fetch("data").first
+
+    assert_equal false, product.dig("attributes", "available")
+    assert_nil product.dig("attributes", "price")
+    assert_equal 0, document.dig("meta", "available_count")
+  end
+
+  def test_hides_liquidity_without_an_applied_client_price
+    client = build_client(pricing: Pricing.new({}))
+
+    document = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
+    product = document.fetch("data").first
+
+    assert_equal false, product.dig("attributes", "available")
+    assert_nil product.dig("attributes", "price")
+    assert_equal 0, document.dig("meta", "available_count")
   end
 
   def test_snapshot_identifier_is_stable_for_identical_catalog_data
@@ -117,5 +145,20 @@ class WebAppBootstrapAPITest < Minitest::Test
     response = @client.get("/v1/products?locale=uk_UA&currency=USDT")
 
     assert_equal 401, response.status
+  end
+
+  private
+
+  def build_client(pricing: @pricing, listings: @listings)
+    Rack::MockRequest.new(
+      ZeroXDA::Market::Transport::JSONAPI.new(
+        kernel: Object.new,
+        token: "protected-token",
+        catalog: @catalog,
+        pricing: pricing,
+        localization: @localization,
+        listings: listings
+      )
+    )
   end
 end

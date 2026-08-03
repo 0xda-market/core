@@ -19,8 +19,16 @@ module ZeroXDA
             locale = @request_parser.requested_locale(request)
             products = @catalog.products(locale: locale)
             prices = @pricing ? @pricing.current_prices : {}
+            available_skus = @listings ? @listings.available_skus.to_h { |sku| [sku, true] } : nil
             data = products.map do |product|
-              present_webapp_product(product, price: prices[product.sku], currency: currency)
+              price = prices[product.sku]
+              available = !price.nil? && (available_skus.nil? || available_skus.key?(product.sku))
+              present_webapp_product(
+                product,
+                price: available ? price : nil,
+                currency: currency,
+                available: available
+              )
             end
             snapshot_id = Digest::SHA256.hexdigest(JSON.generate(data))
 
@@ -33,6 +41,7 @@ module ZeroXDA
                   "snapshot_id" => snapshot_id,
                   "generated_at" => Time.now.utc.iso8601(6),
                   "count" => data.length,
+                  "available_count" => data.count { |resource| resource.dig("attributes", "available") },
                   "complete" => true,
                   "pagination" => "client",
                   "currency" => currency,
@@ -44,11 +53,12 @@ module ZeroXDA
 
           private
 
-          def present_webapp_product(product, price:, currency:)
+          def present_webapp_product(product, price:, currency:, available:)
             resource = present_product(product)
             attributes = resource.fetch("attributes").dup
             attributes.delete("updated_by_user_id")
             attributes.delete("price_updated_by_user_id")
+            attributes["available"] = available
             attributes["price"] = price && public_webapp_price(price, currency)
             resource.merge("attributes" => attributes)
           end

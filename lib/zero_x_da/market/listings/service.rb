@@ -3,6 +3,7 @@
 require "bigdecimal"
 require "securerandom"
 require_relative "../core/contracts"
+require_relative "../pricing/profitability_policy"
 require_relative "listing"
 require_relative "reservation"
 
@@ -17,6 +18,7 @@ module ZeroXDA
           users:,
           catalog:,
           localization: nil,
+          profitability: Pricing::ProfitabilityPolicy.new,
           clock: -> { Time.now.utc },
           id_generator: SecureRandom.method(:uuid)
         )
@@ -24,6 +26,7 @@ module ZeroXDA
           @users = users
           @catalog = catalog
           @localization = localization
+          @profitability = profitability
           @clock = clock
           @id_generator = id_generator
         end
@@ -38,6 +41,42 @@ module ZeroXDA
           @store.transaction do |store|
             release_expired(store, current_time)
             store.available_skus(currency: normalized_currency)
+          end
+        end
+
+        # Catalog prices are derived from the cheapest currently executable
+        # supply cost, not from an arbitrary high broker ask. The policy adds
+        # the configured cost buffer, fees and minimum net margin.
+        def minimum_available_client_prices_usdt
+          @store.transaction do |store|
+            release_expired(store, current_time)
+            lowest_supply_costs_usdt(store.available_listings).transform_values do |cost|
+              @profitability.minimum_client_unit_price_usdt(
+                supply_unit_cost_usdt: cost,
+                quantity: 1
+              )
+            end
+          end
+        end
+
+        # Quote pricing is quantity-aware because a listing must be able to
+        # satisfy the full MVP allocation and fixed execution cost is paid once.
+        def minimum_executable_client_price_usdt(sku:, quantity:)
+          product = marketable_product(sku)
+          requested_quantity = quantity_value(quantity)
+          @store.transaction do |store|
+            release_expired(store, current_time)
+            candidate = priced_listings(
+              store.available_listings(sku: product.sku).select do |listing|
+                listing.available_quantity >= requested_quantity
+              end
+            ).min_by { |listing, cost| [cost, listing.created_at, listing.id] }
+            next unless candidate
+
+            @profitability.minimum_client_unit_price_usdt(
+              supply_unit_cost_usdt: candidate.fetch(1),
+              quantity: requested_quantity
+            )
           end
         end
 
@@ -106,7 +145,15 @@ module ZeroXDA
           end
         end
 
-        def reserve(customer_user_id:, quote_id:, sku:, quantity:, expires_at:, currency: nil)
+        def reserve(
+          customer_user_id:,
+          quote_id:,
+          sku:,
+          quantity:,
+          expires_at:,
+          client_total_price_usdt:,
+          currency: nil
+        )
           customer = active_user(customer_user_id)
           product = marketable_product(sku)
           normalized_currency = currency && currency_code(currency)
@@ -127,13 +174,15 @@ module ZeroXDA
               )
             end
 
-            candidates = store.eligible_listings(sku: product.sku, quantity: requested_quantity)
+            available_listings = store.available_listings(sku: product.sku, for_update: true)
+            candidates = available_listings.select do |listing|
+              listing.available_quantity >= requested_quantity
+            end
             candidates = candidates.select { |entry| entry.currency == normalized_currency } if normalized_currency
-            listing = candidates.filter_map do |entry|
-              cost = normalized_supply_cost(entry)
-              cost && [entry, cost]
-            end.min_by { |entry, cost| [cost, entry.created_at, entry.id] }&.first
-            unless listing
+            selected = priced_listings(candidates).min_by do |entry, cost|
+              [cost, entry.created_at, entry.id]
+            end
+            unless selected
               raise Core::Conflict.new(
                 "insufficient broker liquidity",
                 code: "insufficient_liquidity",
@@ -144,6 +193,13 @@ module ZeroXDA
                 }.compact
               )
             end
+            listing, supply_unit_cost_usdt = selected
+            ensure_profitable_quote!(
+              client_total_price_usdt,
+              product.sku,
+              supply_unit_cost_usdt,
+              requested_quantity
+            )
 
             updated_listing = rebuild_listing(
               listing,
@@ -347,6 +403,37 @@ module ZeroXDA
           return nil unless @localization&.supported_currency?(listing.currency)
 
           @localization.amount_usdt(amount: listing.price_amount, currency: listing.currency)
+        end
+
+        def lowest_supply_costs_usdt(listings)
+          listings.each_with_object({}) do |listing, costs|
+            normalized = normalized_supply_cost(listing)
+            next unless normalized
+
+            current = costs[listing.sku]
+            costs[listing.sku] = normalized if current.nil? || normalized < current
+          end
+        end
+
+        def priced_listings(listings)
+          listings.filter_map do |listing|
+            cost = normalized_supply_cost(listing)
+            cost && [listing, cost]
+          end
+        end
+
+        def ensure_profitable_quote!(client_total_price_usdt, sku, supply_unit_cost_usdt, quantity)
+          return if @profitability.profitable?(
+            client_total_usdt: client_total_price_usdt,
+            supply_unit_cost_usdt: supply_unit_cost_usdt,
+            quantity: quantity
+          )
+
+          raise Core::Conflict.new(
+            "quote must be repriced before inventory reservation",
+            code: "quote_reprice_required",
+            details: { sku: sku }
+          )
         end
 
         def owned_listing(store, actor, listing_id)

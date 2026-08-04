@@ -9,6 +9,7 @@ require "zero_x_da/market/identity/admin_service"
 require "zero_x_da/market/identity/service"
 require "zero_x_da/market/listings/memory_store"
 require "zero_x_da/market/listings/service"
+require "zero_x_da/market/pricing/profitability_policy"
 
 class ListingsServiceTest < Minitest::Test
   def setup
@@ -30,10 +31,17 @@ class ListingsServiceTest < Minitest::Test
     @catalog = ZeroXDA::Market::Catalog::Service.new(
       store: ZeroXDA::Market::Catalog::MemoryStore.new(products: products)
     )
+    @profitability = ZeroXDA::Market::Pricing::ProfitabilityPolicy.new(
+      minimum_margin_bps: 1_000,
+      supply_buffer_bps: 0,
+      variable_fee_bps: 0,
+      fixed_cost_usdt: 0
+    )
     @service = ZeroXDA::Market::Listings::Service.new(
       store: ZeroXDA::Market::Listings::MemoryStore.new,
       users: @users,
       catalog: @catalog,
+      profitability: @profitability,
       clock: @clock,
       id_generator: SequenceIDs.new
     )
@@ -86,7 +94,8 @@ class ListingsServiceTest < Minitest::Test
       quote_id: "quote-1",
       sku: "btc",
       quantity: "1",
-      expires_at: @clock.call + 60
+      expires_at: @clock.call + 60,
+      client_total_price_usdt: "100000"
     )
     reserved = @service.list_owned(actor_user_id: @broker.id).fetch(0)
     assert_equal listing.id, reservation.listing_id
@@ -123,7 +132,8 @@ class ListingsServiceTest < Minitest::Test
       quote_id: "quote-2",
       sku: "btc",
       quantity: "1",
-      expires_at: @clock.call + 30
+      expires_at: @clock.call + 30,
+      client_total_price_usdt: "100000"
     )
     @clock.advance(31)
     assert_equal ["btc"], @service.available_skus
@@ -172,6 +182,65 @@ class ListingsServiceTest < Minitest::Test
 
     error = assert_raises(ZeroXDA::Market::Core::Conflict) { create_listing }
     assert_equal "duplicate_active_listing", error.code
+  end
+
+  def test_derives_the_client_floor_from_the_lowest_available_supply
+    lower = @service.create(
+      actor_user_id: @broker.id,
+      sku: "btc",
+      quantity: "1",
+      price_amount: "9",
+      currency: "USDT"
+    )
+    higher = @service.create(
+      actor_user_id: @other_broker.id,
+      sku: "btc",
+      quantity: "1",
+      price_amount: "90",
+      currency: "USDT"
+    )
+
+    assert_equal(
+      BigDecimal("10"),
+      @service.minimum_available_client_prices_usdt.fetch("btc")
+    )
+
+    @service.withdraw(
+      actor_user_id: @broker.id,
+      listing_id: lower.id,
+      expected_version: lower.version
+    )
+    assert_equal(
+      BigDecimal("100"),
+      @service.minimum_available_client_prices_usdt.fetch("btc")
+    )
+    assert_equal higher.id, @service.list_owned(actor_user_id: @other_broker.id).fetch(0).id
+  end
+
+  def test_rejects_a_quote_that_is_no_longer_profitable_before_reserving_inventory
+    listing = @service.create(
+      actor_user_id: @broker.id,
+      sku: "btc",
+      quantity: "1",
+      price_amount: "9.00000001",
+      currency: "USDT"
+    )
+
+    error = assert_raises(ZeroXDA::Market::Core::Conflict) do
+      @service.reserve(
+        customer_user_id: @client.id,
+        quote_id: "quote-stale",
+        sku: "btc",
+        quantity: "1",
+        expires_at: @clock.call + 60,
+        client_total_price_usdt: "10"
+      )
+    end
+
+    assert_equal "quote_reprice_required", error.code
+    unchanged = @service.list_owned(actor_user_id: @broker.id).fetch(0)
+    assert_equal listing.quantity, unchanged.available_quantity
+    assert_equal BigDecimal("0"), unchanged.reserved_quantity
   end
 
   def test_rejects_precision_beyond_storage_contract

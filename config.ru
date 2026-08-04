@@ -23,6 +23,7 @@ require_relative "lib/zero_x_da/market/catalog/postgres_store"
 require_relative "lib/zero_x_da/market/catalog/service"
 require_relative "lib/zero_x_da/market/pricing/memory_store"
 require_relative "lib/zero_x_da/market/pricing/postgres_store"
+require_relative "lib/zero_x_da/market/pricing/profitability_policy"
 require_relative "lib/zero_x_da/market/pricing/service"
 require_relative "lib/zero_x_da/market/localization/service"
 require_relative "lib/zero_x_da/market/listings/memory_store"
@@ -105,6 +106,30 @@ pricing = ZeroXDA::Market::Pricing::Service.new(
 
 # Currencies are catalog products; their prices are the exchange rates.
 localization = ZeroXDA::Market::Localization::Service.new(catalog: catalog)
+profitability = ZeroXDA::Market::Pricing::ProfitabilityPolicy.new(
+  minimum_margin_bps: Integer(
+    ENV.fetch(
+      "MARKETPLACE_MIN_MARGIN_BPS",
+      ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_MINIMUM_MARGIN_BPS.to_s
+    )
+  ),
+  supply_buffer_bps: Integer(
+    ENV.fetch(
+      "MARKETPLACE_SUPPLY_BUFFER_BPS",
+      ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_SUPPLY_BUFFER_BPS.to_s
+    )
+  ),
+  variable_fee_bps: Integer(
+    ENV.fetch(
+      "MARKETPLACE_VARIABLE_FEE_BPS",
+      ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_VARIABLE_FEE_BPS.to_s
+    )
+  ),
+  fixed_cost_usdt: ENV.fetch(
+    "MARKETPLACE_FIXED_COST_USDT",
+    ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_FIXED_COST_USDT.to_s("F")
+  )
+)
 
 manual_provider = if operator_token && !operator_token.empty?
                     ZeroXDA::Market::Providers::ManualProvider.new(
@@ -141,6 +166,7 @@ listings = ZeroXDA::Market::Listings::Service.new(
   users: identity_store,
   catalog: catalog,
   localization: localization,
+  profitability: profitability,
   clock: clock
 )
 marketplace = ZeroXDA::Market::Marketplace::Service.new(

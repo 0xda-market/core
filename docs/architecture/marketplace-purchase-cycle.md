@@ -49,14 +49,44 @@ The service:
 
 1. verifies an active, marketable product and active client price;
 2. releases expired reservations in the same store transaction;
-3. locks eligible listing rows;
-4. normalizes broker supply prices to USDT where a currency rate exists;
-5. chooses one listing by lowest normalized supply cost, then creation time and ID;
-6. creates the provider quote;
-7. moves the exact quantity from available to reserved inventory;
-8. persists the listing ID, customer ID, quote ID, quantity, supply-price snapshot and expiration.
+3. normalizes broker prices to USDT and selects the cheapest listing able to execute the full requested quantity;
+4. calculates the minimum profitable client price for that executable supply;
+5. uses the greater of the administrator floor and the profitability floor to create the provider quote;
+6. locks current listing rows and reselects the cheapest eligible supply;
+7. rejects a quote as `quote_reprice_required` when its revenue no longer satisfies the profitability policy;
+8. moves the exact quantity from available to reserved inventory;
+9. persists the listing ID, customer ID, quote ID, quantity, supply-price snapshot and expiration.
 
 The MVP intentionally uses one listing per quote. The reservation contract can be extended later with multi-listing allocation without changing the buyer API.
+
+An expensive listing never changes the client price while cheaper executable liquidity remains available. If that liquidity disappears between price calculation and row locking, core either proves the existing quote still meets the policy against the new cheapest supply or rejects it before inventory or an order is created. Once inventory is reserved, later listing edits do not change the quote.
+
+## Profitability policy
+
+Let:
+
+- `C` be normalized broker supply cost for the complete requested quantity;
+- `b` be the supply-risk buffer rate;
+- `F` be fixed execution cost per order;
+- `f` be variable fees as a share of client revenue;
+- `m` be the required net margin as a share of client revenue.
+
+The minimum client revenue is:
+
+```text
+R_min = (C * (1 + b) + F) / (1 - f - m)
+```
+
+This is a margin calculation, not a markup calculation. The policy rounds upward to six-decimal USDT precision and requires `m > 0` and `f + m < 100%` at startup.
+
+Runtime parameters are provider-neutral:
+
+- `MARKETPLACE_MIN_MARGIN_BPS` — minimum net margin; default `100` (1%);
+- `MARKETPLACE_SUPPLY_BUFFER_BPS` — FX, spread and slippage reserve on supply cost; default `100` (1%);
+- `MARKETPLACE_VARIABLE_FEE_BPS` — payment or settlement fees charged as a revenue percentage; default `0`;
+- `MARKETPLACE_FIXED_COST_USDT` — fixed cost allocated once per quote; default `0`.
+
+Catalog prices use quantity `1`. Exact quote pricing is quantity-aware, so a fixed order cost is amortized across the requested quantity. All four inputs are server-controlled and never accepted from browser or channel payloads.
 
 ## Quote acceptance
 

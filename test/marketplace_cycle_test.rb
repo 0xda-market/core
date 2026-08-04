@@ -12,6 +12,7 @@ require "zero_x_da/market/listings/memory_store"
 require "zero_x_da/market/listings/service"
 require "zero_x_da/market/marketplace/service"
 require "zero_x_da/market/pricing/memory_store"
+require "zero_x_da/market/pricing/profitability_policy"
 require "zero_x_da/market/pricing/service"
 require "zero_x_da/market/transport/json_api"
 
@@ -27,6 +28,7 @@ class MarketplaceCycleTest < Minitest::Test
       id_generator: SequenceIDs.new
     )
     @broker = identity.authenticate(provider: "telegram", provider_user_id: "77", role: "broker").user
+    @other_broker = identity.authenticate(provider: "telegram", provider_user_id: "78", role: "broker").user
     @client = identity.authenticate(provider: "telegram", provider_user_id: "79").user
     products = [
       product("premium_3m", marketable: true, position: 1),
@@ -47,10 +49,17 @@ class MarketplaceCycleTest < Minitest::Test
       clock: @clock
     )
     @pricing.apply_price(sku: "premium_3m", amount_usdt: "12.5")
+    @profitability = ZeroXDA::Market::Pricing::ProfitabilityPolicy.new(
+      minimum_margin_bps: 1_000,
+      supply_buffer_bps: 0,
+      variable_fee_bps: 0,
+      fixed_cost_usdt: 0
+    )
     @listings = ZeroXDA::Market::Listings::Service.new(
       store: ZeroXDA::Market::Listings::MemoryStore.new,
       users: @users,
       catalog: @catalog,
+      profitability: @profitability,
       clock: @clock,
       id_generator: SequenceIDs.new
     )
@@ -163,6 +172,73 @@ class MarketplaceCycleTest < Minitest::Test
     released = @listings.list_owned(actor_user_id: @broker.id).fetch(0)
     assert_equal BigDecimal("3"), released.available_quantity
     assert_equal BigDecimal("0"), released.reserved_quantity
+  end
+
+  def test_an_expensive_listing_does_not_move_the_price_while_cheaper_supply_is_executable
+    @listings.create(
+      actor_user_id: @other_broker.id,
+      sku: "premium_3m",
+      quantity: "2",
+      price_amount: "14.75000001",
+      currency: "USDT"
+    )
+
+    quoted = @marketplace.quote(
+      customer_user_id: @client.id,
+      sku: "premium_3m",
+      quantity: "1"
+    )
+
+    assert_equal BigDecimal("12.5"), quoted.unit_price_usdt
+    assert_equal BigDecimal("12.5"), quoted.total_price_usdt
+    assert_equal @listing.id, quoted.reservation.listing_id
+    assert_equal(
+      "12.5",
+      quoted.quote.terms.dig("accepted_payload", "product", "unit_price_usdt")
+    )
+  end
+
+  def test_raises_an_underpriced_admin_floor_to_the_minimum_profitable_price
+    @pricing.apply_price(sku: "premium_3m", amount_usdt: "8")
+
+    quoted = @marketplace.quote(
+      customer_user_id: @client.id,
+      sku: "premium_3m",
+      quantity: "1"
+    )
+
+    assert_equal BigDecimal("10.277778"), quoted.unit_price_usdt
+    assert_equal BigDecimal("10.277778"), quoted.total_price_usdt
+    assert_equal @listing.id, quoted.reservation.listing_id
+  end
+
+  def test_prices_against_the_cheapest_listing_that_can_fill_the_complete_quantity
+    @listings.update(
+      actor_user_id: @broker.id,
+      listing_id: @listing.id,
+      quantity: "1",
+      price_amount: "9.25",
+      currency: "USDT",
+      expected_version: @listing.version
+    )
+    larger = @listings.create(
+      actor_user_id: @other_broker.id,
+      sku: "premium_3m",
+      quantity: "2",
+      price_amount: "14.75",
+      currency: "USDT"
+    )
+    @pricing.apply_price(sku: "premium_3m", amount_usdt: "8")
+
+    quoted = @marketplace.quote(
+      customer_user_id: @client.id,
+      sku: "premium_3m",
+      quantity: "2"
+    )
+
+    assert_equal BigDecimal("16.388889"), quoted.unit_price_usdt
+    assert_equal BigDecimal("32.777778"), quoted.total_price_usdt
+    assert_equal larger.id, quoted.reservation.listing_id
   end
 
   def test_marketplace_api_exposes_payment_state_without_supply_economics

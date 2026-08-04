@@ -29,6 +29,10 @@ Every submitted price is validated against the catalog before persistence. The s
 - A stale revision raises `concurrency_conflict` before any price is appended.
 - A valid application appends the submitted batch or nothing; unchanged and currently unpriced catalog rows need not be repeated.
 
+For marketable products, the applied administrator amount is a commercial client-price floor. Buyer catalog and quote surfaces use the greater of that amount and the minimum profitable price derived from the cheapest broker listing that can execute the requested quantity. An expensive outlier listing does not move the market while cheaper executable liquidity remains available.
+
+The append-only pricing ledger remains unchanged. Profitability is computed at the buyer boundary and revalidated while reserving inventory; an administrator price can therefore remain stable while broker supply changes without permitting a loss-making order.
+
 Existing command adapters may omit the revision for backward compatibility. Reviewed interactive workspaces must preserve and submit the explicit proposal revision.
 
 Every JSON API `POST` response includes a top-level operation `status`: `ok` for a successful response and `error` for a rejected response. Resource lifecycle status remains under `data.attributes.status`; the top-level field only reports the request outcome.

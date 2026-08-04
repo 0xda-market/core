@@ -90,6 +90,10 @@ domain:
   pricing:
     history: append_only
     table: market.product_prices
+    profitability:
+      allocation: cheapest_executable_listing
+      enforcement: quote_and_locked_reservation
+      strictly_positive_margin: true
   currencies:
     representation: non_marketable_products
     separate_fx_table: false

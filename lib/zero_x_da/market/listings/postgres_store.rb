@@ -34,6 +34,15 @@ module ZeroXDA
           scope.select_map(:sku).uniq.sort
         end
 
+        def available_listings(sku: nil, for_update: false)
+          scope = @listings.where(status: "active")
+                           .where { available_quantity > 0 }
+          scope = scope.where(sku: sku.to_s) if sku
+          scope = scope.order(:sku, :created_at, :id)
+          scope = scope.for_update if for_update
+          scope.all.map { |row| deserialize(row) }
+        end
+
         def eligible_listings(sku:, quantity:)
           @listings.where(status: "active", sku: sku.to_s)
                    .where { available_quantity >= quantity }

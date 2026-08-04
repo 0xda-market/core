@@ -53,6 +53,17 @@ module ZeroXDA
           end
         end
 
+        def available_listings(sku: nil, for_update: false)
+          @monitor.synchronize do
+            @listings.values
+                     .select do |listing|
+                       listing.status == "active" && listing.available_quantity.positive? &&
+                         (sku.nil? || listing.sku == sku.to_s)
+                     end
+                     .sort_by { |listing| [listing.sku, listing.created_at, listing.id] }
+          end
+        end
+
         def eligible_listings(sku:, quantity:)
           @monitor.synchronize do
             @listings.values.select do |listing|

@@ -7,7 +7,7 @@ require_relative "decision"
 module ZeroXDA
   module Market
     module BrokerOrders
-      Entry = Struct.new(:decision, :order, :reservation, :listing, keyword_init: true)
+      Entry = Struct.new(:decision, :order, :reservation, :listing, :changed, keyword_init: true)
 
       class Service
         def initialize(store:, kernel:, listings:, provider:, clock: -> { Time.now.utc })
@@ -30,18 +30,18 @@ module ZeroXDA
           persisted = @store.transaction do |store|
             store.find(order.id) || store.insert(decision)
           end
-          entry(persisted, order: order, context: context)
+          entry(persisted, order: order, context: context, changed: persisted.equal?(decision))
         end
 
         def list(actor_user_id:)
-          actor_contexts = @store.list_by_seller(actor_user_id.to_s).map do |decision|
+          actor = @listings.broker_user(actor_user_id: actor_user_id)
+          @store.list_by_seller(actor.id).map do |decision|
             context = @listings.broker_order_context(
-              actor_user_id: actor_user_id,
+              actor_user_id: actor.id,
               order_id: decision.order_id
             )
             entry(decision, context: context)
           end
-          actor_contexts
         end
 
         def accept(actor_user_id:, order_id:, expected_version:)
@@ -49,28 +49,30 @@ module ZeroXDA
             actor_user_id: actor_user_id,
             order_id: order_id
           )
-          now = current_time
+          version = normalized_version(expected_version)
+          changed = false
           decision = @store.transaction do |store|
             current = store.find(order_id) ||
                       raise(Core::NotFound.new("broker_order_decision", order_id))
             ensure_seller!(current, context.listing.seller_user_id)
             next current if %w[accepted completed].include?(current.status)
-            unless current.version == Integer(expected_version)
+            unless current.version == version
               raise Core::ConcurrencyConflict.new("broker_order_decision", current.order_id)
             end
 
+            changed = true
             store.replace(
               rebuild(
                 current,
                 status: "accepted",
-                accepted_at: now,
-                updated_at: now,
+                accepted_at: current_time,
+                updated_at: current_time,
                 version: current.version + 1
               ),
               expected_version: current.version
             )
           end
-          entry(decision, context: context)
+          entry(decision, context: context, changed: changed)
         end
 
         def complete(actor_user_id:, order_id:, expected_version:, reference: nil, data: {})
@@ -78,6 +80,7 @@ module ZeroXDA
             actor_user_id: actor_user_id,
             order_id: order_id
           )
+          version = normalized_version(expected_version)
           current = @store.find(order_id) ||
                     raise(Core::NotFound.new("broker_order_decision", order_id))
           ensure_seller!(current, context.listing.seller_user_id)
@@ -89,7 +92,7 @@ module ZeroXDA
               details: { order_id: order_id.to_s }
             )
           end
-          unless current.version == Integer(expected_version)
+          unless current.version == version
             raise Core::ConcurrencyConflict.new("broker_order_decision", current.order_id)
           end
 
@@ -129,7 +132,6 @@ module ZeroXDA
             )
           end
 
-          now = current_time
           completed = @store.transaction do |store|
             latest = store.find(order_id) ||
                      raise(Core::NotFound.new("broker_order_decision", order_id))
@@ -142,21 +144,19 @@ module ZeroXDA
               rebuild(
                 latest,
                 status: "completed",
-                completed_at: now,
-                updated_at: now,
+                completed_at: current_time,
+                updated_at: current_time,
                 version: latest.version + 1
               ),
               expected_version: latest.version
             )
           end
-          entry(completed, order: order, context: context)
-        rescue ArgumentError, TypeError
-          raise ArgumentError, "version must be a non-negative integer"
+          entry(completed, order: order, context: context, changed: true)
         end
 
         private
 
-        def entry(decision, order: nil, context: nil)
+        def entry(decision, order: nil, context: nil, changed: false)
           context ||= @listings.broker_order_context(
             actor_user_id: decision.seller_user_id,
             order_id: decision.order_id
@@ -165,7 +165,8 @@ module ZeroXDA
             decision: decision,
             order: order || @kernel.find_order(decision.order_id),
             reservation: context.reservation,
-            listing: context.listing
+            listing: context.listing,
+            changed: changed
           )
         end
 
@@ -178,10 +179,17 @@ module ZeroXDA
           )
         end
 
+        def normalized_version(value)
+          number = Integer(value)
+          raise ArgumentError, "version must be a non-negative integer" if number.negative?
+
+          number
+        rescue ArgumentError, TypeError
+          raise ArgumentError, "version must be a non-negative integer"
+        end
+
         def rebuild(decision, **changes)
-          Decision.new(**decision.instance_variables.to_h do |name|
-            [name.to_s.delete_prefix("@").to_sym, decision.instance_variable_get(name)]
-          end.merge(changes))
+          Decision.new(**decision.to_h.merge(changes))
         end
 
         def current_time

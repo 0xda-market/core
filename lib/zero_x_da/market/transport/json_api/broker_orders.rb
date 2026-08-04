@@ -37,7 +37,7 @@ module ZeroXDA
               order_id: id,
               expected_version: body.fetch("version")
             )
-            resource_response(200, present_broker_order(entry))
+            broker_order_response(entry, event: "broker_order_accepted")
           end
 
           def complete_broker_order(request, id:)
@@ -49,10 +49,20 @@ module ZeroXDA
               reference: body["reference"],
               data: body.fetch("data", {})
             )
-            resource_response(200, present_broker_order(entry))
+            broker_order_response(entry, event: "broker_order_completed")
           end
 
           private
+
+          def broker_order_response(entry, event:)
+            resource = present_broker_order(entry)
+            resource["meta"] = {
+              "changed" => entry.changed,
+              "notification_event" => entry.changed ? event : nil,
+              "notification_recipient_user_id" => entry.changed ? entry.reservation.customer_user_id : nil
+            }.compact
+            resource_response(200, resource)
+          end
 
           def present_broker_order(entry)
             decision = entry.decision

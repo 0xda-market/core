@@ -134,6 +134,32 @@ class WebAppBootstrapAPITest < Minitest::Test
     assert_equal 0, document.dig("meta", "available_count")
   end
 
+  def test_exposes_a_product_only_after_price_and_broker_liquidity_are_both_current
+    prices = {}
+    available_skus = []
+    client = build_client(
+      pricing: Pricing.new(prices),
+      listings: Listings.new(available_skus)
+    )
+
+    unavailable = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
+    assert_equal false, unavailable.dig("data", 0, "attributes", "available")
+
+    available_skus << "premium_3m"
+    liquidity_only = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
+    assert_equal false, liquidity_only.dig("data", 0, "attributes", "available")
+
+    prices["premium_3m"] = Price.new(
+      amount_usdt: BigDecimal("13.25"),
+      source: "admin",
+      set_by_user_id: "internal-price-editor-id",
+      created_at: Time.utc(2026, 7, 31, 17, 0, 0)
+    )
+    available = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
+    assert_equal true, available.dig("data", 0, "attributes", "available")
+    assert_equal "13.25", available.dig("data", 0, "attributes", "price", "amount")
+  end
+
   def test_snapshot_identifier_is_stable_for_identical_catalog_data
     first = JSON.parse(@client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
     second = JSON.parse(@client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)

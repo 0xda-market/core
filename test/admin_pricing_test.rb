@@ -86,6 +86,7 @@ class AdminPricingTest < Minitest::Test
     )
     assert_equal 201, applied.status, applied.body
     document = JSON.parse(applied.body)
+    assert_equal "ok", document.fetch("status")
     assert_equal 1, document.dig("meta", "revision")
     assert_equal "12.5", document.dig("data", 0, "attributes", "amount_usdt")
 

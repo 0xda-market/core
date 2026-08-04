@@ -21,6 +21,15 @@ module ZeroXDA
           def json_response(status, document)
             [status, JSON_HEADERS, [JSON.generate(document)]]
           end
+
+          def post_status_response(response)
+            http_status, headers, body = response
+            payload = body.each_with_object(+"") { |chunk, buffer| buffer << chunk.to_s }
+            body.close if body.respond_to?(:close)
+            document = JSON.parse(payload)
+            document["status"] ||= (200..299).cover?(http_status.to_i) ? "ok" : "error"
+            [http_status, headers, [JSON.generate(document)]]
+          end
         end
       end
     end

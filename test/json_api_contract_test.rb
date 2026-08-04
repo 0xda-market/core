@@ -57,7 +57,9 @@ class JSONAPIContractTest < Minitest::Test
     )
 
     assert_equal 422, response.status
-    error = JSON.parse(response.body).fetch("errors").first
+    document = JSON.parse(response.body)
+    assert_equal "error", document.fetch("status")
+    error = document.fetch("errors").first
     assert_equal "validation_error", error.fetch("code")
     assert_equal "content type must be application/json", error.fetch("message")
     assert_equal({}, error.fetch("details"))
@@ -71,8 +73,28 @@ class JSONAPIContractTest < Minitest::Test
     )
 
     assert_equal 400, response.status
-    error = JSON.parse(response.body).fetch("errors").first
+    document = JSON.parse(response.body)
+    assert_equal "error", document.fetch("status")
+    error = document.fetch("errors").first
     assert_equal "missing_field", error.fetch("code")
     assert_equal({ "field" => "payload" }, error.fetch("details"))
+  end
+
+  def test_every_post_response_exposes_a_top_level_operation_status
+    created = @client.post(
+      "/v1/intents",
+      "CONTENT_TYPE" => "application/json",
+      input: JSON.generate(capability: "anything.operation", payload: {})
+    )
+    missing = @client.post(
+      "/unknown",
+      "CONTENT_TYPE" => "application/json",
+      input: "{}"
+    )
+
+    assert_equal 201, created.status, created.body
+    assert_equal "ok", JSON.parse(created.body).fetch("status")
+    assert_equal 404, missing.status, missing.body
+    assert_equal "error", JSON.parse(missing.body).fetch("status")
   end
 end

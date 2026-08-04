@@ -29,7 +29,12 @@ require_relative "lib/zero_x_da/market/localization/service"
 require_relative "lib/zero_x_da/market/listings/memory_store"
 require_relative "lib/zero_x_da/market/listings/postgres_store"
 require_relative "lib/zero_x_da/market/listings/service"
+require_relative "lib/zero_x_da/market/listings/broker_order_access"
+require_relative "lib/zero_x_da/market/broker_orders/memory_store"
+require_relative "lib/zero_x_da/market/broker_orders/postgres_store"
+require_relative "lib/zero_x_da/market/broker_orders/service"
 require_relative "lib/zero_x_da/market/marketplace/service"
+require_relative "lib/zero_x_da/market/marketplace/broker_order_decisions"
 
 clock = -> { Time.now.utc }
 environment = ENV.fetch("DEPLOY_ENV", "development")
@@ -169,11 +174,24 @@ listings = ZeroXDA::Market::Listings::Service.new(
   profitability: profitability,
   clock: clock
 )
+broker_order_store = if database
+                       ZeroXDA::Market::BrokerOrders::PostgresStore.new(database: database)
+                     else
+                       ZeroXDA::Market::BrokerOrders::MemoryStore.new
+                     end
+broker_orders = manual_provider && ZeroXDA::Market::BrokerOrders::Service.new(
+  store: broker_order_store,
+  kernel: kernel,
+  listings: listings,
+  provider: manual_provider,
+  clock: clock
+)
 marketplace = ZeroXDA::Market::Marketplace::Service.new(
   kernel: kernel,
   catalog: catalog,
   pricing: pricing,
-  listings: listings
+  listings: listings,
+  broker_orders: broker_orders
 )
 public_api = ZeroXDA::Market::Transport::JSONAPI.new(
   kernel: kernel,
@@ -185,7 +203,8 @@ public_api = ZeroXDA::Market::Transport::JSONAPI.new(
   pricing: pricing,
   localization: localization,
   listings: listings,
-  marketplace: marketplace
+  marketplace: marketplace,
+  broker_orders: broker_orders
 )
 
 applications = { "/" => public_api }

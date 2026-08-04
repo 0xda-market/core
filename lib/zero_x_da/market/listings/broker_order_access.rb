@@ -9,8 +9,12 @@ module ZeroXDA
       module BrokerOrderAccess
         BrokerOrderContext = Struct.new(:reservation, :listing, keyword_init: true)
 
+        def broker_user(actor_user_id:)
+          send(:active_seller, actor_user_id)
+        end
+
         def broker_order_context(actor_user_id:, order_id:)
-          actor = send(:active_seller, actor_user_id)
+          actor = broker_user(actor_user_id: actor_user_id)
           reservation = reservation_for_order(order_id) ||
                         raise(Core::NotFound.new("listing_reservation", order_id))
           listing = @store.find_listing(reservation.listing_id) ||

@@ -18,17 +18,9 @@ module ZeroXDA
     module Transport
       class JSONAPI
         def initialize(
-          kernel:,
-          token: nil,
-          readiness: -> { true },
-          identity_service: nil,
-          admin_service: nil,
-          catalog: nil,
-          pricing: nil,
-          localization: nil,
-          listings: nil,
-          marketplace: nil,
-          broker_orders: nil
+          kernel:, token: nil, readiness: -> { true }, identity_service: nil,
+          admin_service: nil, catalog: nil, pricing: nil, localization: nil,
+          listings: nil, marketplace: nil, broker_orders: nil
         )
           error_mapper = ErrorMapper.new
           request_parser = RequestParser.new(localization: localization)

@@ -49,14 +49,17 @@ The service:
 
 1. verifies an active, marketable product and active client price;
 2. releases expired reservations in the same store transaction;
-3. locks eligible listing rows;
-4. normalizes broker supply prices to USDT where a currency rate exists;
-5. chooses one listing by lowest normalized supply cost, then creation time and ID;
-6. creates the provider quote;
-7. moves the exact quantity from available to reserved inventory;
-8. persists the listing ID, customer ID, quote ID, quantity, supply-price snapshot and expiration.
+3. normalizes active broker supply prices to USDT where a currency rate exists;
+4. raises the buyer unit price to the highest normalized active listing price when that floor exceeds the applied client price;
+5. creates the provider quote with that effective client price;
+6. locks current listing rows and rejects the quote as `client_price_stale` if a newer listing price would make it underpriced;
+7. chooses one eligible listing by lowest normalized supply cost, then creation time and ID;
+8. moves the exact quantity from available to reserved inventory;
+9. persists the listing ID, customer ID, quote ID, quantity, supply-price snapshot and expiration.
 
 The MVP intentionally uses one listing per quote. The reservation contract can be extended later with multi-listing allocation without changing the buyer API.
+
+The highest listing defines the client price floor, while the lowest eligible listing remains the allocation choice. This preserves the buyer-facing invariant without exposing broker identity or changing internal allocation economics. Once inventory is reserved, later listing edits do not change the quote.
 
 ## Quote acceptance
 

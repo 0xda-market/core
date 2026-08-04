@@ -250,6 +250,10 @@ class PostgresPersistenceTest < Minitest::Test
       price_amount: "65000.12345678",
       currency: "USDT"
     )
+    assert_equal(
+      BigDecimal("65000.123457"),
+      service.maximum_available_prices_usdt.fetch("btc")
+    )
 
     @database.disconnect
     @database = connect
@@ -262,6 +266,7 @@ class PostgresPersistenceTest < Minitest::Test
     assert_equal BigDecimal("0"), persisted.sold_quantity
     assert_equal BigDecimal("65000.12345678"), persisted.price_amount
     assert_equal broker.id, persisted.seller_user_id
+    assert_equal [listing.id], restarted.available_listings(sku: "btc").map(&:id)
   end
 
   def test_external_identity_auth_recovers_from_a_stale_pooled_connection

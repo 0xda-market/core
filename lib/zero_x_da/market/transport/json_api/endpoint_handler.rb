@@ -373,6 +373,33 @@ module ZeroXDA
             }
           end
 
+          def available_listing_price_floors_usdt
+            @listings&.maximum_available_prices_usdt
+          end
+
+          def effective_client_price_amount(price, sku:, price_floors:)
+            return nil unless price
+            return price.amount_usdt if price_floors.nil?
+
+            floor = price_floors[sku]
+            floor && [price.amount_usdt, floor].max
+          end
+
+          def present_effective_client_price(price, amount_usdt:, currency:)
+            presented = present_localized_price(price, currency)
+            return presented if amount_usdt == price.amount_usdt
+
+            amount = if @localization
+                       @localization.convert(amount_usdt: amount_usdt, currency: currency)
+                     else
+                       amount_usdt
+                     end
+            presented.merge(
+              "amount" => decimal_string(amount),
+              "amount_usdt" => decimal_string(amount_usdt)
+            )
+          end
+
           def present_price(price)
             {
               "type" => "price",

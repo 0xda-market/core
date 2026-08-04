@@ -174,6 +174,59 @@ class ListingsServiceTest < Minitest::Test
     assert_equal "duplicate_active_listing", error.code
   end
 
+  def test_computes_the_highest_active_listing_as_the_client_price_floor
+    lower = create_listing
+    higher = @service.create(
+      actor_user_id: @other_broker.id,
+      sku: "btc",
+      quantity: "0.25",
+      price_amount: "66000.12345678",
+      currency: "USDT"
+    )
+
+    assert_equal(
+      BigDecimal("66000.123457"),
+      @service.maximum_available_prices_usdt.fetch("btc")
+    )
+
+    @service.withdraw(
+      actor_user_id: @other_broker.id,
+      listing_id: higher.id,
+      expected_version: higher.version
+    )
+    assert_equal(
+      BigDecimal("65000.123457"),
+      @service.maximum_available_prices_usdt.fetch("btc")
+    )
+    assert_equal lower.id, @service.list_owned(actor_user_id: @broker.id).fetch(0).id
+  end
+
+  def test_rejects_a_stale_client_price_before_reserving_inventory
+    listing = @service.create(
+      actor_user_id: @broker.id,
+      sku: "btc",
+      quantity: "1",
+      price_amount: "10.00000001",
+      currency: "USDT"
+    )
+
+    error = assert_raises(ZeroXDA::Market::Core::Conflict) do
+      @service.reserve(
+        customer_user_id: @client.id,
+        quote_id: "quote-stale",
+        sku: "btc",
+        quantity: "1",
+        expires_at: @clock.call + 60,
+        client_unit_price_usdt: "10"
+      )
+    end
+
+    assert_equal "client_price_stale", error.code
+    unchanged = @service.list_owned(actor_user_id: @broker.id).fetch(0)
+    assert_equal listing.quantity, unchanged.available_quantity
+    assert_equal BigDecimal("0"), unchanged.reserved_quantity
+  end
+
   def test_rejects_precision_beyond_storage_contract
     error = assert_raises(ArgumentError) do
       @service.create(

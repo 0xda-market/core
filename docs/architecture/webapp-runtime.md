@@ -21,9 +21,11 @@ A market product is actionable only when the same live bootstrap observes both a
 A product is buyer-available only when both conditions hold at snapshot generation time:
 
 - an applied client price exists;
-- at least one active broker listing has available inventory.
+- at least one active broker listing has available inventory and a supply price that can be normalized to USDT.
 
-The snapshot emits `attributes.available` explicitly and omits the public price when either condition is false. Broker identity, supply price and inventory allocation details remain private. Quote creation still revalidates price and liquidity transactionally, so the snapshot is presentation state rather than settlement authority.
+The applied client price is the administrator-controlled base. The buyer-facing unit price is the greater of that base and the highest normalized price among active broker listings with available inventory. Normalized listing amounts are rounded upward to the six-decimal client-price precision, so presentation never falls below broker supply.
+
+The snapshot emits `attributes.available` explicitly and omits the public price when either condition is false. It returns only the effective client price; broker identity, individual supply prices and inventory allocation details remain private. Quote creation recomputes the same floor and validates it again while locking current listing rows, so the snapshot is presentation state rather than settlement authority.
 
 The public snapshot excludes internal audit identities. Browsing state is not settlement authority: quote, acceptance and order operations always revalidate current server state.
 

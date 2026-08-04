@@ -19,13 +19,19 @@ module ZeroXDA
             locale = @request_parser.requested_locale(request)
             products = @catalog.products(locale: locale)
             prices = @pricing ? @pricing.current_prices : {}
-            available_skus = @listings ? @listings.available_skus.to_h { |sku| [sku, true] } : nil
+            price_floors = available_listing_price_floors_usdt
             data = products.map do |product|
               price = prices[product.sku]
-              available = !price.nil? && (available_skus.nil? || available_skus.key?(product.sku))
+              amount_usdt = effective_client_price_amount(
+                price,
+                sku: product.sku,
+                price_floors: price_floors
+              )
+              available = !amount_usdt.nil?
               present_webapp_product(
                 product,
                 price: available ? price : nil,
+                amount_usdt: amount_usdt,
                 currency: currency,
                 available: available
               )
@@ -53,18 +59,26 @@ module ZeroXDA
 
           private
 
-          def present_webapp_product(product, price:, currency:, available:)
+          def present_webapp_product(product, price:, amount_usdt:, currency:, available:)
             resource = present_product(product)
             attributes = resource.fetch("attributes").dup
             attributes.delete("updated_by_user_id")
             attributes.delete("price_updated_by_user_id")
             attributes["available"] = available
-            attributes["price"] = price && public_webapp_price(price, currency)
+            attributes["price"] = price && public_webapp_price(
+              price,
+              amount_usdt: amount_usdt,
+              currency: currency
+            )
             resource.merge("attributes" => attributes)
           end
 
-          def public_webapp_price(price, currency)
-            present_localized_price(price, currency).reject do |key, _value|
+          def public_webapp_price(price, amount_usdt:, currency:)
+            present_effective_client_price(
+              price,
+              amount_usdt: amount_usdt,
+              currency: currency
+            ).reject do |key, _value|
               key == "edited_by_user_id"
             end
           end

@@ -10,13 +10,22 @@ module ZeroXDA
             locale = @request_parser.requested_locale(request)
             products = @catalog.products(locale: locale)
             prices = @pricing ? @pricing.current_prices : {}
-            available_skus = @listings ? @listings.available_skus.to_h { |sku| [sku, true] } : nil
+            price_floors = available_listing_price_floors_usdt
             data = products.map do |product|
               resource = present_product(product)
-              available = available_skus.nil? || available_skus.key?(product.sku)
-              price = available && prices[product.sku]
+              available = price_floors.nil? || price_floors.key?(product.sku)
+              price = prices[product.sku]
+              amount_usdt = available && effective_client_price_amount(
+                price,
+                sku: product.sku,
+                price_floors: price_floors
+              )
               resource["attributes"]["available"] = available
-              resource["attributes"]["price"] = price && present_localized_price(price, currency)
+              resource["attributes"]["price"] = amount_usdt && present_effective_client_price(
+                price,
+                amount_usdt: amount_usdt,
+                currency: currency
+              )
               resource
             end
             json_response(

@@ -35,12 +35,12 @@ class WebAppBootstrapAPITest < Minitest::Test
   end
 
   class Listings
-    def initialize(available_skus)
-      @available_skus = available_skus
+    def initialize(price_floors)
+      @price_floors = price_floors
     end
 
-    def available_skus
-      @available_skus
+    def maximum_available_prices_usdt
+      @price_floors
     end
   end
 
@@ -86,7 +86,7 @@ class WebAppBootstrapAPITest < Minitest::Test
       )
     )
     @localization = Localization.new
-    @listings = Listings.new(["premium_3m"])
+    @listings = Listings.new("premium_3m" => BigDecimal("9.25"))
     @client = build_client
   end
 
@@ -113,7 +113,7 @@ class WebAppBootstrapAPITest < Minitest::Test
   end
 
   def test_hides_a_client_price_without_active_broker_liquidity
-    client = build_client(listings: Listings.new([]))
+    client = build_client(listings: Listings.new({}))
 
     document = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
     product = document.fetch("data").first
@@ -136,16 +136,16 @@ class WebAppBootstrapAPITest < Minitest::Test
 
   def test_exposes_a_product_only_after_price_and_broker_liquidity_are_both_current
     prices = {}
-    available_skus = []
+    price_floors = {}
     client = build_client(
       pricing: Pricing.new(prices),
-      listings: Listings.new(available_skus)
+      listings: Listings.new(price_floors)
     )
 
     unavailable = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
     assert_equal false, unavailable.dig("data", 0, "attributes", "available")
 
-    available_skus << "premium_3m"
+    price_floors["premium_3m"] = BigDecimal("9.25")
     liquidity_only = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
     assert_equal false, liquidity_only.dig("data", 0, "attributes", "available")
 
@@ -158,6 +158,29 @@ class WebAppBootstrapAPITest < Minitest::Test
     available = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
     assert_equal true, available.dig("data", 0, "attributes", "available")
     assert_equal "13.25", available.dig("data", 0, "attributes", "price", "amount")
+  end
+
+  def test_never_exposes_a_price_below_the_highest_active_listing
+    client = build_client(
+      listings: Listings.new("premium_3m" => BigDecimal("14.75"))
+    )
+
+    public_document = JSON.parse(
+      client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body
+    )
+    public_price = public_document.dig("data", 0, "attributes", "price")
+    assert_equal "14.75", public_price.fetch("amount")
+    assert_equal "14.75", public_price.fetch("amount_usdt")
+    refute public_price.key?("edited_by_user_id")
+
+    protected_response = client.get(
+      "/v1/products?locale=uk_UA&currency=USDT",
+      "HTTP_AUTHORIZATION" => "Bearer protected-token"
+    )
+    assert_equal 200, protected_response.status
+    protected_price = JSON.parse(protected_response.body).dig("data", 0, "attributes", "price")
+    assert_equal "14.75", protected_price.fetch("amount")
+    assert_equal "14.75", protected_price.fetch("amount_usdt")
   end
 
   def test_snapshot_identifier_is_stable_for_identical_catalog_data

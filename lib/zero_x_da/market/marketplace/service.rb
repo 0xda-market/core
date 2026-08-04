@@ -52,8 +52,10 @@ module ZeroXDA
             )
           end
 
+          price_floor = @listings.maximum_available_prices_usdt[product.sku]
+          unit_price = price_floor ? [price.amount_usdt, price_floor].max : price.amount_usdt
           requested_quantity = quantity_value(quantity)
-          total_price = (price.amount_usdt * requested_quantity).round(6)
+          total_price = (unit_price * requested_quantity).round(6)
           intent = @kernel.create_intent(
             capability: CAPABILITY,
             payload: {
@@ -62,7 +64,7 @@ module ZeroXDA
                 "sku" => product.sku,
                 "name" => product.name,
                 "quantity" => requested_quantity.to_s("F"),
-                "unit_price_usdt" => price.amount_usdt.to_s("F"),
+                "unit_price_usdt" => unit_price.to_s("F"),
                 "total_price_usdt" => total_price.to_s("F"),
                 "currency" => "USDT"
               }
@@ -81,13 +83,14 @@ module ZeroXDA
             quote_id: quote.id,
             sku: product.sku,
             quantity: requested_quantity,
-            expires_at: quote.expires_at
+            expires_at: quote.expires_at,
+            client_unit_price_usdt: unit_price
           )
           QuoteResult.new(
             quote: quote,
             reservation: reservation,
             product: product,
-            unit_price_usdt: price.amount_usdt,
+            unit_price_usdt: unit_price,
             total_price_usdt: total_price
           )
         end

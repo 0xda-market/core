@@ -11,6 +11,7 @@ module ZeroXDA
     module Listings
       class Service
         SELLER_ROLES = %w[broker admin].freeze
+        CLIENT_PRICE_SCALE = 6
 
         def initialize(
           store:,
@@ -38,6 +39,17 @@ module ZeroXDA
           @store.transaction do |store|
             release_expired(store, current_time)
             store.available_skus(currency: normalized_currency)
+          end
+        end
+
+        # The buyer-facing price must cover every active broker listing that
+        # can currently supply the product. Supply prices are normalized into
+        # USDT and rounded upward to the client price precision so the public
+        # amount can never fall below the underlying listing.
+        def maximum_available_prices_usdt
+          @store.transaction do |store|
+            release_expired(store, current_time)
+            price_floors_usdt(store.available_listings)
           end
         end
 
@@ -106,7 +118,15 @@ module ZeroXDA
           end
         end
 
-        def reserve(customer_user_id:, quote_id:, sku:, quantity:, expires_at:, currency: nil)
+        def reserve(
+          customer_user_id:,
+          quote_id:,
+          sku:,
+          quantity:,
+          expires_at:,
+          currency: nil,
+          client_unit_price_usdt: nil
+        )
           customer = active_user(customer_user_id)
           product = marketable_product(sku)
           normalized_currency = currency && currency_code(currency)
@@ -127,7 +147,15 @@ module ZeroXDA
               )
             end
 
-            candidates = store.eligible_listings(sku: product.sku, quantity: requested_quantity)
+            available_listings = store.available_listings(sku: product.sku, for_update: true)
+            ensure_client_price_covers_listings!(
+              client_unit_price_usdt,
+              product.sku,
+              available_listings
+            )
+            candidates = available_listings.select do |listing|
+              listing.available_quantity >= requested_quantity
+            end
             candidates = candidates.select { |entry| entry.currency == normalized_currency } if normalized_currency
             listing = candidates.filter_map do |entry|
               cost = normalized_supply_cost(entry)
@@ -347,6 +375,40 @@ module ZeroXDA
           return nil unless @localization&.supported_currency?(listing.currency)
 
           @localization.amount_usdt(amount: listing.price_amount, currency: listing.currency)
+        end
+
+        def price_floors_usdt(listings)
+          listings.each_with_object({}) do |listing, floors|
+            normalized = normalized_supply_cost(listing)
+            next unless normalized
+
+            floor = normalized.round(CLIENT_PRICE_SCALE, BigDecimal::ROUND_CEILING)
+            current = floors[listing.sku]
+            floors[listing.sku] = floor if current.nil? || floor > current
+          end
+        end
+
+        def ensure_client_price_covers_listings!(client_unit_price_usdt, sku, listings)
+          return if client_unit_price_usdt.nil?
+
+          price = positive_decimal(client_unit_price_usdt, field: "client unit price")
+          floor = price_floors_usdt(listings)[sku]
+          return if floor.nil? || price >= floor
+
+          raise Core::Conflict.new(
+            "client price changed before inventory reservation",
+            code: "client_price_stale",
+            details: { sku: sku }
+          )
+        end
+
+        def positive_decimal(value, field:)
+          number = value.is_a?(BigDecimal) ? value : BigDecimal(value.to_s)
+          raise ArgumentError, "#{field} must be a positive number" unless number.finite? && number.positive?
+
+          number
+        rescue ArgumentError
+          raise ArgumentError, "#{field} must be a positive number"
         end
 
         def owned_listing(store, actor, listing_id)

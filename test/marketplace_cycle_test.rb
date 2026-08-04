@@ -27,6 +27,7 @@ class MarketplaceCycleTest < Minitest::Test
       id_generator: SequenceIDs.new
     )
     @broker = identity.authenticate(provider: "telegram", provider_user_id: "77", role: "broker").user
+    @other_broker = identity.authenticate(provider: "telegram", provider_user_id: "78", role: "broker").user
     @client = identity.authenticate(provider: "telegram", provider_user_id: "79").user
     products = [
       product("premium_3m", marketable: true, position: 1),
@@ -163,6 +164,30 @@ class MarketplaceCycleTest < Minitest::Test
     released = @listings.list_owned(actor_user_id: @broker.id).fetch(0)
     assert_equal BigDecimal("3"), released.available_quantity
     assert_equal BigDecimal("0"), released.reserved_quantity
+  end
+
+  def test_quotes_the_highest_listing_price_floor_but_allocates_the_lowest_cost_listing
+    @listings.create(
+      actor_user_id: @other_broker.id,
+      sku: "premium_3m",
+      quantity: "2",
+      price_amount: "14.75000001",
+      currency: "USDT"
+    )
+
+    quoted = @marketplace.quote(
+      customer_user_id: @client.id,
+      sku: "premium_3m",
+      quantity: "1"
+    )
+
+    assert_equal BigDecimal("14.750001"), quoted.unit_price_usdt
+    assert_equal BigDecimal("14.750001"), quoted.total_price_usdt
+    assert_equal @listing.id, quoted.reservation.listing_id
+    assert_equal(
+      "14.750001",
+      quoted.quote.terms.dig("accepted_payload", "product", "unit_price_usdt")
+    )
   end
 
   def test_marketplace_api_exposes_payment_state_without_supply_economics

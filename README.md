@@ -48,6 +48,7 @@ and enforced by architecture tests.
 - provider-neutral users and external identities;
 - internal-UUID administrator authorization;
 - localized product catalog and append-only price history;
+- execution-aware client pricing with a server-side positive-margin gate;
 - broker-owned asset listings with exact quantity and price amounts;
 - PostgreSQL and in-memory adapters;
 - health-gated development VPS deployment with Caddy HTTPS and bot routing.
@@ -215,6 +216,8 @@ bundle install
 DEPLOY_ENV=development \
 PUBLIC_API_TOKEN=client-secret \
 MANUAL_PROVIDER_TOKEN=operator-secret \
+MARKETPLACE_MIN_MARGIN_BPS=100 \
+MARKETPLACE_SUPPLY_BUFFER_BPS=100 \
 DATABASE_URL='postgresql://postgres:password@localhost:5432/0xda_market' \
 bundle exec rackup
 ```
@@ -224,6 +227,12 @@ fulfillment capability but keeps `/health` available. Production requires both
 API tokens and `DATABASE_URL`.
 
 Core runtime variables do not include channel tokens or webhook secrets.
+
+Marketplace pricing treats the administrator price as a floor and raises it only
+when the cheapest executable broker supply would otherwise miss the configured
+net margin. `MARKETPLACE_VARIABLE_FEE_BPS` and
+`MARKETPLACE_FIXED_COST_USDT` add provider-neutral variable and fixed execution
+costs; both default to zero until a settlement adapter supplies a cost contract.
 
 ## Public API lifecycle
 

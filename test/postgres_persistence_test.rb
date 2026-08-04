@@ -250,9 +250,10 @@ class PostgresPersistenceTest < Minitest::Test
       price_amount: "65000.12345678",
       currency: "USDT"
     )
-    assert_equal(
-      BigDecimal("65000.123457"),
-      service.maximum_available_prices_usdt.fetch("btc")
+    assert_operator(
+      service.minimum_available_client_prices_usdt.fetch("btc"),
+      :>,
+      BigDecimal("65000.12345678")
     )
 
     @database.disconnect

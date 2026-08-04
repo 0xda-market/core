@@ -101,6 +101,20 @@ class RuntimeTest < Minitest::Test
     end
   end
 
+  def test_rejects_a_runtime_without_a_positive_marketplace_margin
+    with_environment(
+      "DEPLOY_ENV" => "development",
+      "PUBLIC_API_TOKEN" => "client-secret",
+      "MANUAL_PROVIDER_TOKEN" => "operator-secret",
+      "DATABASE_URL" => nil,
+      "MARKETPLACE_MIN_MARGIN_BPS" => "0"
+    ) do
+      assert_raises(ArgumentError) do
+        Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__))
+      end
+    end
+  end
+
   private
 
   def with_environment(changes)

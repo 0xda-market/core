@@ -373,15 +373,15 @@ module ZeroXDA
             }
           end
 
-          def available_listing_price_floors_usdt
-            @listings&.maximum_available_prices_usdt
+          def available_minimum_client_prices_usdt
+            @listings&.minimum_available_client_prices_usdt
           end
 
-          def effective_client_price_amount(price, sku:, price_floors:)
+          def effective_client_price_amount(price, sku:, minimum_prices:)
             return nil unless price
-            return price.amount_usdt if price_floors.nil?
+            return price.amount_usdt if minimum_prices.nil?
 
-            floor = price_floors[sku]
+            floor = minimum_prices[sku]
             floor && [price.amount_usdt, floor].max
           end
 

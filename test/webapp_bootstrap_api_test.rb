@@ -35,12 +35,12 @@ class WebAppBootstrapAPITest < Minitest::Test
   end
 
   class Listings
-    def initialize(price_floors)
-      @price_floors = price_floors
+    def initialize(minimum_prices)
+      @minimum_prices = minimum_prices
     end
 
-    def maximum_available_prices_usdt
-      @price_floors
+    def minimum_available_client_prices_usdt
+      @minimum_prices
     end
   end
 
@@ -136,16 +136,16 @@ class WebAppBootstrapAPITest < Minitest::Test
 
   def test_exposes_a_product_only_after_price_and_broker_liquidity_are_both_current
     prices = {}
-    price_floors = {}
+    minimum_prices = {}
     client = build_client(
       pricing: Pricing.new(prices),
-      listings: Listings.new(price_floors)
+      listings: Listings.new(minimum_prices)
     )
 
     unavailable = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
     assert_equal false, unavailable.dig("data", 0, "attributes", "available")
 
-    price_floors["premium_3m"] = BigDecimal("9.25")
+    minimum_prices["premium_3m"] = BigDecimal("9.25")
     liquidity_only = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
     assert_equal false, liquidity_only.dig("data", 0, "attributes", "available")
 
@@ -160,7 +160,7 @@ class WebAppBootstrapAPITest < Minitest::Test
     assert_equal "13.25", available.dig("data", 0, "attributes", "price", "amount")
   end
 
-  def test_never_exposes_a_price_below_the_highest_active_listing
+  def test_never_exposes_a_price_below_the_minimum_profitable_executable_price
     client = build_client(
       listings: Listings.new("premium_3m" => BigDecimal("14.75"))
     )

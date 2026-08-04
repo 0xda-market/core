@@ -19,6 +19,7 @@ module ZeroXDA
 
       class Service
         CAPABILITY = "manual.fulfillment"
+        CLIENT_PRICE_SCALE = 6
 
         def initialize(kernel:, catalog:, pricing:, listings:)
           @kernel = kernel
@@ -52,10 +53,30 @@ module ZeroXDA
             )
           end
 
-          price_floor = @listings.maximum_available_prices_usdt[product.sku]
-          unit_price = price_floor ? [price.amount_usdt, price_floor].max : price.amount_usdt
           requested_quantity = quantity_value(quantity)
-          total_price = (unit_price * requested_quantity).round(6)
+          price_floor = @listings.minimum_executable_client_price_usdt(
+            sku: product.sku,
+            quantity: requested_quantity
+          )
+          unless price_floor
+            raise Core::Conflict.new(
+              "insufficient broker liquidity",
+              code: "insufficient_liquidity",
+              details: {
+                sku: product.sku,
+                quantity: requested_quantity.to_s("F")
+              }
+            )
+          end
+
+          unit_price = [price.amount_usdt, price_floor].max.round(
+            CLIENT_PRICE_SCALE,
+            BigDecimal::ROUND_CEILING
+          )
+          total_price = (unit_price * requested_quantity).round(
+            CLIENT_PRICE_SCALE,
+            BigDecimal::ROUND_CEILING
+          )
           intent = @kernel.create_intent(
             capability: CAPABILITY,
             payload: {
@@ -84,7 +105,7 @@ module ZeroXDA
             sku: product.sku,
             quantity: requested_quantity,
             expires_at: quote.expires_at,
-            client_unit_price_usdt: unit_price
+            client_total_price_usdt: total_price
           )
           QuoteResult.new(
             quote: quote,

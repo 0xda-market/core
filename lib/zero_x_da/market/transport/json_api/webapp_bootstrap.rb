@@ -19,13 +19,13 @@ module ZeroXDA
             locale = @request_parser.requested_locale(request)
             products = @catalog.products(locale: locale)
             prices = @pricing ? @pricing.current_prices : {}
-            price_floors = available_listing_price_floors_usdt
+            minimum_prices = available_minimum_client_prices_usdt
             data = products.map do |product|
               price = prices[product.sku]
               amount_usdt = effective_client_price_amount(
                 price,
                 sku: product.sku,
-                price_floors: price_floors
+                minimum_prices: minimum_prices
               )
               available = !amount_usdt.nil?
               present_webapp_product(

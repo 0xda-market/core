@@ -44,6 +44,20 @@ module ZeroXDA
           @version = Core::RecordSupport.non_negative_integer(version, field: "version")
           freeze
         end
+
+        def to_h
+          {
+            order_id: order_id,
+            reservation_id: reservation_id,
+            seller_user_id: seller_user_id,
+            status: status,
+            accepted_at: accepted_at,
+            completed_at: completed_at,
+            created_at: created_at,
+            updated_at: updated_at,
+            version: version
+          }
+        end
       end
     end
   end

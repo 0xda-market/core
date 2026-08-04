@@ -25,8 +25,7 @@ module ZeroXDA
         def list_by_seller(seller_user_id)
           @decisions.where(seller_user_id: seller_user_id.to_s)
                     .order(Sequel.desc(:updated_at), Sequel.desc(:order_id))
-                    .all
-                    .map { |row| deserialize(row) }
+                    .all.map { |row| deserialize(row) }
         end
 
         def insert(decision)
@@ -56,31 +55,15 @@ module ZeroXDA
         private
 
         def serialize(decision)
-          {
-            order_id: decision.order_id,
-            reservation_id: decision.reservation_id,
-            seller_user_id: decision.seller_user_id,
-            status: decision.status,
-            accepted_at: decision.accepted_at,
-            completed_at: decision.completed_at,
-            created_at: decision.created_at,
-            updated_at: decision.updated_at,
-            version: decision.version
-          }
+          decision.to_h
         end
 
         def deserialize(row)
-          Decision.new(
-            order_id: row.fetch(:order_id),
-            reservation_id: row.fetch(:reservation_id),
-            seller_user_id: row.fetch(:seller_user_id),
-            status: row.fetch(:status),
-            accepted_at: row[:accepted_at],
-            completed_at: row[:completed_at],
-            created_at: row.fetch(:created_at),
-            updated_at: row.fetch(:updated_at),
-            version: row.fetch(:version)
-          )
+          Decision.new(**row.slice(
+            :order_id, :reservation_id, :seller_user_id, :status,
+            :accepted_at, :completed_at, :accepted_notified_at,
+            :completed_notified_at, :created_at, :updated_at, :version
+          ))
         end
       end
     end

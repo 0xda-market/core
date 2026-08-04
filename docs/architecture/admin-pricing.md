@@ -19,7 +19,7 @@ GET /v1/admin/prices/proposal
 
 POST /v1/admin/prices
   revision: <proposal revision>
-  prices: [complete application]
+  prices: [one or more changed prices]
 ```
 
 Every submitted price is validated against the catalog before persistence. The store then acquires one revision lock and compares the submitted revision with the current ledger revision.
@@ -27,9 +27,11 @@ Every submitted price is validated against the catalog before persistence. The s
 - Memory uses one mutex-protected atomic append.
 - PostgreSQL uses one transaction and transaction-scoped advisory lock.
 - A stale revision raises `concurrency_conflict` before any price is appended.
-- A valid application appends the complete batch or nothing.
+- A valid application appends the submitted batch or nothing; unchanged and currently unpriced catalog rows need not be repeated.
 
 Existing command adapters may omit the revision for backward compatibility. Reviewed interactive workspaces must preserve and submit the explicit proposal revision.
+
+Every JSON API `POST` response includes a top-level operation `status`: `ok` for a successful response and `error` for a rejected response. Resource lifecycle status remains under `data.attributes.status`; the top-level field only reports the request outcome.
 
 ## History
 

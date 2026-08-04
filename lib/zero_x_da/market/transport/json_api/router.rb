@@ -1,12 +1,15 @@
 # frozen_string_literal: true
 
 require "rack"
+require_relative "response"
 
 module ZeroXDA
   module Market
     module Transport
       class JSONAPI
         class Router
+          include Response
+
           Route = Struct.new(:handler, :params, :public, keyword_init: true) do
             def public?
               public
@@ -20,8 +23,8 @@ module ZeroXDA
           end
 
           def call(environment)
-            @error_mapper.call do
-              request = Rack::Request.new(environment)
+            request = Rack::Request.new(environment)
+            response = @error_mapper.call do
               route = resolve(request)
 
               if route.public? || authorized?(request)
@@ -30,6 +33,7 @@ module ZeroXDA
                 @error_mapper.unauthorized
               end
             end
+            request.post? ? post_status_response(response) : response
           end
 
           private

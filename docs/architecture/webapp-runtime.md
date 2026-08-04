@@ -16,6 +16,8 @@ telegram-bot/webapp -> webapp-core -> core JSON APIs
 
 `GET /v1/webapp/bootstrap` remains a core API and returns every active sellable product for one locale and presentation currency in a single response. Its `meta` contract includes `schema_version`, `snapshot_id`, `generated_at`, `count`, `available_count`, `complete: true`, `pagination: client`, `locale` and `currency`.
 
+A market product is actionable only when the same live bootstrap observes both an applied client price and positive active broker liquidity. Broker supply alone intentionally keeps `price: null`; the administrator price workspace may apply only the changed price rows, after which the next bootstrap exposes the product without a core restart.
+
 A product is buyer-available only when both conditions hold at snapshot generation time:
 
 - an applied client price exists;

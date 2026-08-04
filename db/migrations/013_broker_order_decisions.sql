@@ -5,6 +5,8 @@ CREATE TABLE market.broker_order_decisions (
   status text NOT NULL DEFAULT 'requested',
   accepted_at timestamptz,
   completed_at timestamptz,
+  accepted_notified_at timestamptz,
+  completed_notified_at timestamptz,
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL,
   version integer NOT NULL DEFAULT 0,
@@ -15,6 +17,11 @@ CREATE TABLE market.broker_order_decisions (
       (status = 'requested' AND accepted_at IS NULL AND completed_at IS NULL) OR
       (status = 'accepted' AND accepted_at IS NOT NULL AND completed_at IS NULL) OR
       (status = 'completed' AND accepted_at IS NOT NULL AND completed_at IS NOT NULL)
+    ),
+  CONSTRAINT broker_order_decisions_notification_timestamps_check
+    CHECK (
+      (accepted_notified_at IS NULL OR accepted_at IS NOT NULL) AND
+      (completed_notified_at IS NULL OR completed_at IS NOT NULL)
     )
 );
 

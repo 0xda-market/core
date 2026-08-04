@@ -93,6 +93,7 @@ class PostgresPersistenceTest < Minitest::Test
         007_product_catalog_localizations 008_legacy_catalog_rollback_window
         009_currencies_as_products 010_broker_listings
         011_marketplace_inventory 012_payment_aware_orders
+        013_broker_order_decisions
       ],
       versions
     )

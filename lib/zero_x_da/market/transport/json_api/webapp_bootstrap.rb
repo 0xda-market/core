@@ -20,19 +20,27 @@ module ZeroXDA
             products = @catalog.products(locale: locale)
             prices = @pricing ? @pricing.current_prices : {}
             minimum_prices = available_minimum_client_prices_usdt
+            listed_skus = if @listings&.respond_to?(:available_skus)
+                            @listings.available_skus.to_h { |sku| [sku, true] }
+                          elsif minimum_prices
+                            minimum_prices.transform_values { true }
+                          end
             data = products.map do |product|
               price = prices[product.sku]
+              listed = listed_skus.nil? || listed_skus.key?(product.sku)
               amount_usdt = effective_client_price_amount(
                 price,
                 sku: product.sku,
                 minimum_prices: minimum_prices
               )
-              available = !amount_usdt.nil?
+              available = listed && !amount_usdt.nil?
+              visible_amount_usdt = amount_usdt || (price&.amount_usdt if listed)
               present_webapp_product(
                 product,
-                price: available ? price : nil,
-                amount_usdt: amount_usdt,
+                price: visible_amount_usdt && price,
+                amount_usdt: visible_amount_usdt,
                 currency: currency,
+                listed: listed,
                 available: available
               )
             end
@@ -47,6 +55,7 @@ module ZeroXDA
                   "snapshot_id" => snapshot_id,
                   "generated_at" => Time.now.utc.iso8601(6),
                   "count" => data.length,
+                  "listed_count" => data.count { |resource| resource.dig("attributes", "listed") },
                   "available_count" => data.count { |resource| resource.dig("attributes", "available") },
                   "complete" => true,
                   "pagination" => "client",
@@ -59,11 +68,12 @@ module ZeroXDA
 
           private
 
-          def present_webapp_product(product, price:, amount_usdt:, currency:, available:)
+          def present_webapp_product(product, price:, amount_usdt:, currency:, listed:, available:)
             resource = present_product(product)
             attributes = resource.fetch("attributes").dup
             attributes.delete("updated_by_user_id")
             attributes.delete("price_updated_by_user_id")
+            attributes["listed"] = listed
             attributes["available"] = available
             attributes["price"] = price && public_webapp_price(
               price,

@@ -1,0 +1,194 @@
+# frozen_string_literal: true
+
+require "time"
+require_relative "../core/contracts"
+require_relative "decision"
+
+module ZeroXDA
+  module Market
+    module BrokerOrders
+      Entry = Struct.new(:decision, :order, :reservation, :listing, keyword_init: true)
+
+      class Service
+        def initialize(store:, kernel:, listings:, provider:, clock: -> { Time.now.utc })
+          @store = store
+          @kernel = kernel
+          @listings = listings
+          @provider = provider
+          @clock = clock
+        end
+
+        def request(order:, reservation:)
+          context = @listings.broker_order_context_for_reservation(reservation)
+          now = current_time
+          decision = Decision.new(
+            order_id: order.id,
+            reservation_id: reservation.id,
+            seller_user_id: context.listing.seller_user_id,
+            created_at: now
+          )
+          persisted = @store.transaction do |store|
+            store.find(order.id) || store.insert(decision)
+          end
+          entry(persisted, order: order, context: context)
+        end
+
+        def list(actor_user_id:)
+          actor_contexts = @store.list_by_seller(actor_user_id.to_s).map do |decision|
+            context = @listings.broker_order_context(
+              actor_user_id: actor_user_id,
+              order_id: decision.order_id
+            )
+            entry(decision, context: context)
+          end
+          actor_contexts
+        end
+
+        def accept(actor_user_id:, order_id:, expected_version:)
+          context = @listings.broker_order_context(
+            actor_user_id: actor_user_id,
+            order_id: order_id
+          )
+          now = current_time
+          decision = @store.transaction do |store|
+            current = store.find(order_id) ||
+                      raise(Core::NotFound.new("broker_order_decision", order_id))
+            ensure_seller!(current, context.listing.seller_user_id)
+            next current if %w[accepted completed].include?(current.status)
+            unless current.version == Integer(expected_version)
+              raise Core::ConcurrencyConflict.new("broker_order_decision", current.order_id)
+            end
+
+            store.replace(
+              rebuild(
+                current,
+                status: "accepted",
+                accepted_at: now,
+                updated_at: now,
+                version: current.version + 1
+              ),
+              expected_version: current.version
+            )
+          end
+          entry(decision, context: context)
+        end
+
+        def complete(actor_user_id:, order_id:, expected_version:, reference: nil, data: {})
+          context = @listings.broker_order_context(
+            actor_user_id: actor_user_id,
+            order_id: order_id
+          )
+          current = @store.find(order_id) ||
+                    raise(Core::NotFound.new("broker_order_decision", order_id))
+          ensure_seller!(current, context.listing.seller_user_id)
+          return entry(current, context: context) if current.status == "completed"
+          unless current.status == "accepted"
+            raise Core::Conflict.new(
+              "broker must accept the order before completion",
+              code: "broker_acceptance_required",
+              details: { order_id: order_id.to_s }
+            )
+          end
+          unless current.version == Integer(expected_version)
+            raise Core::ConcurrencyConflict.new("broker_order_decision", current.order_id)
+          end
+
+          order = @kernel.find_order(order_id)
+          unless order.payment&.fetch("status", nil) == "confirmed"
+            raise Core::Conflict.new(
+              "payment confirmation is required before broker completion",
+              code: "payment_required",
+              details: { order_id: order_id.to_s }
+            )
+          end
+          task_id = order.progress&.fetch("reference", nil)
+          unless task_id
+            order = @kernel.execute_order(order.id)
+            task_id = order.progress&.fetch("reference", nil)
+          end
+          unless task_id
+            raise Core::Conflict.new(
+              "fulfillment task is unavailable",
+              code: "fulfillment_not_ready",
+              details: { order_id: order_id.to_s }
+            )
+          end
+
+          @provider.claim_task(task_id, assignee: context.listing.seller_user_id)
+          @provider.complete_task(
+            task_id,
+            reference: reference.to_s.empty? ? "broker/#{current.order_id}" : reference.to_s,
+            data: data
+          )
+          order = @kernel.execute_order(order.id)
+          unless order.status == "succeeded"
+            raise Core::Conflict.new(
+              "fulfillment did not complete",
+              code: "fulfillment_incomplete",
+              details: { order_id: order.id, status: order.status }
+            )
+          end
+
+          now = current_time
+          completed = @store.transaction do |store|
+            latest = store.find(order_id) ||
+                     raise(Core::NotFound.new("broker_order_decision", order_id))
+            next latest if latest.status == "completed"
+            unless latest.version == current.version
+              raise Core::ConcurrencyConflict.new("broker_order_decision", latest.order_id)
+            end
+
+            store.replace(
+              rebuild(
+                latest,
+                status: "completed",
+                completed_at: now,
+                updated_at: now,
+                version: latest.version + 1
+              ),
+              expected_version: latest.version
+            )
+          end
+          entry(completed, order: order, context: context)
+        rescue ArgumentError, TypeError
+          raise ArgumentError, "version must be a non-negative integer"
+        end
+
+        private
+
+        def entry(decision, order: nil, context: nil)
+          context ||= @listings.broker_order_context(
+            actor_user_id: decision.seller_user_id,
+            order_id: decision.order_id
+          )
+          Entry.new(
+            decision: decision,
+            order: order || @kernel.find_order(decision.order_id),
+            reservation: context.reservation,
+            listing: context.listing
+          )
+        end
+
+        def ensure_seller!(decision, seller_user_id)
+          return if decision.seller_user_id == seller_user_id.to_s
+
+          raise Core::Forbidden.new(
+            "broker order belongs to another seller",
+            details: { order_id: decision.order_id }
+          )
+        end
+
+        def rebuild(decision, **changes)
+          Decision.new(**decision.instance_variables.to_h do |name|
+            [name.to_s.delete_prefix("@").to_sym, decision.instance_variable_get(name)]
+          end.merge(changes))
+        end
+
+        def current_time
+          value = @clock.call
+          value.is_a?(Time) ? value.utc : Time.parse(value.to_s).utc
+        end
+      end
+    end
+  end
+end

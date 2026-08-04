@@ -1,5 +1,5 @@
 CREATE TABLE market.broker_order_decisions (
-  order_id uuid PRIMARY KEY REFERENCES market.orders(id) ON DELETE CASCADE,
+  order_id text PRIMARY KEY REFERENCES market.orders(id) ON DELETE CASCADE,
   reservation_id uuid NOT NULL UNIQUE REFERENCES market.listing_reservations(id) ON DELETE CASCADE,
   seller_user_id uuid NOT NULL REFERENCES market.users(id),
   status text NOT NULL DEFAULT 'requested',

@@ -36,10 +36,17 @@ module ZeroXDA
           def localized_client_amount(amount_usdt, currency)
             return amount_usdt unless @localization
 
-            @localization.present_client_price(
-              amount_usdt: amount_usdt,
-              currency: currency
-            )
+            if @localization.respond_to?(:present_client_price)
+              @localization.present_client_price(
+                amount_usdt: amount_usdt,
+                currency: currency
+              )
+            else
+              @localization.convert(
+                amount_usdt: amount_usdt,
+                currency: currency
+              )
+            end
           end
         end
 

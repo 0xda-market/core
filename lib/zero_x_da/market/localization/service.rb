@@ -2,6 +2,7 @@
 
 require "bigdecimal"
 require_relative "locale"
+require_relative "../pricing/client_price_presentation_policy"
 
 module ZeroXDA
   module Market
@@ -18,10 +19,10 @@ module ZeroXDA
           "en" => "en_US",
           "uk" => "uk_UA"
         }.freeze
-        DISPLAY_SCALE = 2
 
-        def initialize(catalog:)
+        def initialize(catalog:, client_price_presentation: Pricing::ClientPricePresentationPolicy.new)
           @catalog = catalog
+          @client_price_presentation = client_price_presentation
         end
 
         # Unsupported languages fall back to the default instead of failing:
@@ -51,6 +52,8 @@ module ZeroXDA
           product&.currency_code || BASE_CURRENCY
         end
 
+        # Exact FX conversion. This contract is used by domain and adapter code
+        # that must not inherit client-facing commercial presentation rules.
         def convert(amount_usdt:, currency:)
           normalized = normalize_currency(currency)
           amount = decimal(amount_usdt, field: "amount_usdt")
@@ -59,7 +62,16 @@ module ZeroXDA
           rate = rate_for(normalized)
           raise ArgumentError, "currency is not supported: #{normalized}" unless rate
 
-          (amount / rate).round(DISPLAY_SCALE)
+          amount / rate
+        end
+
+        # Buyer-facing conversion applies smart commercial presentation only
+        # after exact FX conversion. Keeping this as a separate port preserves
+        # the existing conversion contract and prevents policy leakage.
+        def present_client_price(amount_usdt:, currency:)
+          normalized = normalize_currency(currency)
+          exact = convert(amount_usdt: amount_usdt, currency: normalized)
+          @client_price_presentation.present(amount: exact, currency: normalized)
         end
 
         # Converts a broker-denominated supply amount into the canonical

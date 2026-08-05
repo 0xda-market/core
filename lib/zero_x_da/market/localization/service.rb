@@ -52,21 +52,25 @@ module ZeroXDA
           product&.currency_code || BASE_CURRENCY
         end
 
-        # Buyer-facing conversion is deliberately distinct from FX math. The
-        # exact localized amount is shaped by a currency-aware commercial
-        # policy that only rounds upward and therefore cannot weaken margin.
+        # Exact FX conversion. This contract is used by domain and adapter code
+        # that must not inherit client-facing commercial presentation rules.
         def convert(amount_usdt:, currency:)
           normalized = normalize_currency(currency)
           amount = decimal(amount_usdt, field: "amount_usdt")
-          exact = if normalized == BASE_CURRENCY
-                    amount
-                  else
-                    rate = rate_for(normalized)
-                    raise ArgumentError, "currency is not supported: #{normalized}" unless rate
+          return amount if normalized == BASE_CURRENCY
 
-                    amount / rate
-                  end
+          rate = rate_for(normalized)
+          raise ArgumentError, "currency is not supported: #{normalized}" unless rate
 
+          amount / rate
+        end
+
+        # Buyer-facing conversion applies smart commercial presentation only
+        # after exact FX conversion. Keeping this as a separate port preserves
+        # the existing conversion contract and prevents policy leakage.
+        def present_client_price(amount_usdt:, currency:)
+          normalized = normalize_currency(currency)
+          exact = convert(amount_usdt: amount_usdt, currency: normalized)
           @client_price_presentation.present(amount: exact, currency: normalized)
         end
 

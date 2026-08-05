@@ -70,8 +70,7 @@ module ZeroXDA
             minor_unit = StepRule.new(step: "0.01")
             five_minor_units = StepRule.new(step: "0.05")
             fifty_units = StepRule.new(step: "50")
-            common_endings = EndingRule.new(endings: %w[9 19 49 99], cycle: "100")
-            huf_endings = EndingRule.new(endings: %w[9 49 99], cycle: "100")
+            whole_nine_ending = EndingRule.new(endings: ["9"], cycle: "10")
 
             Registry.new(
               default_rule: minor_unit,
@@ -80,11 +79,11 @@ module ZeroXDA
                 "EUR" => five_minor_units,
                 "GBP" => five_minor_units,
                 "CHF" => five_minor_units,
-                "PLN" => common_endings,
-                "CZK" => common_endings,
+                "PLN" => whole_nine_ending,
+                "CZK" => whole_nine_ending,
                 "UAH" => fifty_units,
                 "RUB" => fifty_units,
-                "HUF" => huf_endings
+                "HUF" => whole_nine_ending
               }
             )
           end

@@ -1,0 +1,26 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require "json"
+require "time"
+require_relative "../lib/zero_x_da/market/adapters/fx_refresh_runtime"
+
+runtime = ZeroXDA::Market::Adapters::FXRefreshRuntime.new(
+  database_url: ENV.fetch("DATABASE_URL"),
+  provider_name: ENV.fetch("FX_RATE_PROVIDER", "coinbase"),
+  request_timeout_seconds: Integer(ENV.fetch("FX_RATE_REQUEST_TIMEOUT_SECONDS", "10"))
+)
+
+begin
+  result = runtime.refresh
+  puts JSON.generate(
+    status: "ok",
+    provider: result.snapshot.provider,
+    observed_at: result.snapshot.observed_at.iso8601(6),
+    currencies: result.snapshot.rates.keys,
+    revision: result.prices.map(&:id).compact.max
+  )
+ensure
+  runtime.close
+end

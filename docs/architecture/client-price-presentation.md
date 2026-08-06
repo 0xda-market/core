@@ -3,7 +3,9 @@
 Core keeps profitability and settlement math in USDT, then converts the protected client amount into the requested display currency. A separate presentation policy shapes that exact converted amount into a predictable market-facing price.
 
 ```text
-profitability-protected USDT amount
+step 0: fresh persisted FX snapshot
+  -> profitability-protected USDT amount
+step 1:
   -> exact FX conversion
   -> currency-aware upward presentation
   -> client-visible amount
@@ -20,3 +22,5 @@ Initial rules are deliberately explicit:
 - currencies without a dedicated profile round upward to their `0.01` minor unit.
 
 The policy affects buyer-facing localized amounts only. Broker supply normalization continues to use exact exchange-rate math and eight-decimal USDT precision. Adding or changing a currency profile is a core policy change and must include examples and regression tests.
+
+Rate acquisition, atomic persistence, provider provenance and stale-rate behavior are defined separately in [FX rate refresh](fx-rate-refresh.md). Presentation cannot run for a non-base currency whose persisted rate has exceeded the runtime TTL.

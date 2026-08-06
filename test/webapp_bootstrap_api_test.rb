@@ -35,12 +35,12 @@ class WebAppBootstrapAPITest < Minitest::Test
   end
 
   class Listings
-    def initialize(minimum_prices)
-      @minimum_prices = minimum_prices
+    def initialize(executable_skus)
+      @executable_skus = executable_skus
     end
 
-    def minimum_available_client_prices_usdt
-      @minimum_prices
+    def executable_skus(client_unit_prices_usdt:)
+      @executable_skus
     end
   end
 
@@ -86,7 +86,7 @@ class WebAppBootstrapAPITest < Minitest::Test
       )
     )
     @localization = Localization.new
-    @listings = Listings.new("premium_3m" => BigDecimal("9.25"))
+    @listings = Listings.new(["premium_3m"])
     @client = build_client
   end
 
@@ -113,7 +113,7 @@ class WebAppBootstrapAPITest < Minitest::Test
   end
 
   def test_hides_a_client_price_without_active_broker_liquidity
-    client = build_client(listings: Listings.new({}))
+    client = build_client(listings: Listings.new([]))
 
     document = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
     product = document.fetch("data").first
@@ -136,16 +136,16 @@ class WebAppBootstrapAPITest < Minitest::Test
 
   def test_exposes_a_product_only_after_price_and_broker_liquidity_are_both_current
     prices = {}
-    minimum_prices = {}
+    executable_skus = []
     client = build_client(
       pricing: Pricing.new(prices),
-      listings: Listings.new(minimum_prices)
+      listings: Listings.new(executable_skus)
     )
 
     unavailable = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
     assert_equal false, unavailable.dig("data", 0, "attributes", "available")
 
-    minimum_prices["premium_3m"] = BigDecimal("9.25")
+    executable_skus << "premium_3m"
     liquidity_only = JSON.parse(client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body)
     assert_equal false, liquidity_only.dig("data", 0, "attributes", "available")
 
@@ -160,17 +160,17 @@ class WebAppBootstrapAPITest < Minitest::Test
     assert_equal "13.25", available.dig("data", 0, "attributes", "price", "amount")
   end
 
-  def test_never_exposes_a_price_below_the_minimum_profitable_executable_price
+  def test_never_replaces_the_admin_sale_price_with_a_broker_derived_price
     client = build_client(
-      listings: Listings.new("premium_3m" => BigDecimal("14.75"))
+      listings: Listings.new(["premium_3m"])
     )
 
     public_document = JSON.parse(
       client.get("/v1/webapp/bootstrap?locale=uk_UA&currency=USDT").body
     )
     public_price = public_document.dig("data", 0, "attributes", "price")
-    assert_equal "14.75", public_price.fetch("amount")
-    assert_equal "14.75", public_price.fetch("amount_usdt")
+    assert_equal "13.25", public_price.fetch("amount")
+    assert_equal "13.25", public_price.fetch("amount_usdt")
     refute public_price.key?("edited_by_user_id")
 
     protected_response = client.get(
@@ -179,8 +179,8 @@ class WebAppBootstrapAPITest < Minitest::Test
     )
     assert_equal 200, protected_response.status
     protected_price = JSON.parse(protected_response.body).dig("data", 0, "attributes", "price")
-    assert_equal "14.75", protected_price.fetch("amount")
-    assert_equal "14.75", protected_price.fetch("amount_usdt")
+    assert_equal "13.25", protected_price.fetch("amount")
+    assert_equal "13.25", protected_price.fetch("amount_usdt")
   end
 
   def test_snapshot_identifier_is_stable_for_identical_catalog_data

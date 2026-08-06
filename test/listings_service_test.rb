@@ -12,6 +12,20 @@ require "zero_x_da/market/listings/service"
 require "zero_x_da/market/pricing/profitability_policy"
 
 class ListingsServiceTest < Minitest::Test
+  class IdentityLocalization
+    def supported_currency?(_currency)
+      true
+    end
+
+    def amount_usdt(amount:, currency:)
+      BigDecimal(amount.to_s)
+    end
+
+    def convert(amount_usdt:, currency:)
+      BigDecimal(amount_usdt.to_s)
+    end
+  end
+
   def setup
     @clock = MutableClock.new
     @users = ZeroXDA::Market::Identity::MemoryStore.new
@@ -41,6 +55,7 @@ class ListingsServiceTest < Minitest::Test
       store: ZeroXDA::Market::Listings::MemoryStore.new,
       users: @users,
       catalog: @catalog,
+      localization: IdentityLocalization.new,
       profitability: @profitability,
       clock: @clock,
       id_generator: SequenceIDs.new
@@ -184,7 +199,7 @@ class ListingsServiceTest < Minitest::Test
     assert_equal "duplicate_active_listing", error.code
   end
 
-  def test_derives_the_client_floor_from_the_lowest_available_supply
+  def test_executable_availability_follows_the_fixed_admin_price
     lower = @service.create(
       actor_user_id: @broker.id,
       sku: "btc",
@@ -200,9 +215,8 @@ class ListingsServiceTest < Minitest::Test
       currency: "USDT"
     )
 
-    assert_equal(
-      BigDecimal("10"),
-      @service.minimum_available_client_prices_usdt.fetch("btc")
+    assert_equal ["btc"], @service.executable_skus(
+      client_unit_prices_usdt: { "btc" => BigDecimal("10") }
     )
 
     @service.withdraw(
@@ -210,14 +224,102 @@ class ListingsServiceTest < Minitest::Test
       listing_id: lower.id,
       expected_version: lower.version
     )
-    assert_equal(
-      BigDecimal("100"),
-      @service.minimum_available_client_prices_usdt.fetch("btc")
+    assert_empty @service.executable_skus(
+      client_unit_prices_usdt: { "btc" => BigDecimal("10") }
     )
     assert_equal higher.id, @service.list_owned(actor_user_id: @other_broker.id).fetch(0).id
   end
 
-  def test_rejects_a_quote_that_is_no_longer_profitable_before_reserving_inventory
+  def test_marks_only_supply_profitable_at_the_admin_sale_price_as_executable
+    @service.create(
+      actor_user_id: @broker.id,
+      sku: "btc",
+      quantity: "1",
+      price_amount: "9.00000001",
+      currency: "USDT"
+    )
+
+    assert_empty @service.executable_skus(
+      client_unit_prices_usdt: { "btc" => BigDecimal("10") }
+    )
+    assert_equal ["btc"], @service.executable_skus(
+      client_unit_prices_usdt: { "btc" => BigDecimal("10.000001") }
+    )
+  end
+
+  def test_exposes_private_routing_feedback_without_competitor_prices
+    best = @service.create(
+      actor_user_id: @broker.id,
+      sku: "btc",
+      quantity: "1",
+      price_amount: "8",
+      currency: "USDT"
+    )
+    @service.create(
+      actor_user_id: @other_broker.id,
+      sku: "btc",
+      quantity: "1",
+      price_amount: "8.5",
+      currency: "USDT"
+    )
+
+    feedback = @service.routing_feedback(
+      actor_user_id: @broker.id,
+      listing_id: best.id,
+      client_unit_price_usdt: "10"
+    )
+
+    assert_equal "executable", feedback.execution_status
+    assert_equal "best", feedback.routing_status
+    assert_equal BigDecimal("0.8"), feedback.estimated_order_share
+    assert_equal 2, feedback.eligible_supply_count
+    assert_equal BigDecimal("9"), feedback.maximum_ask_amount
+    assert_equal "USDT", feedback.maximum_ask_currency
+    refute_respond_to feedback, :competitor_price
+  end
+
+  def test_one_broker_cannot_capture_multiple_routing_tiers_with_currency_duplicates
+    best = @service.create(
+      actor_user_id: @broker.id,
+      sku: "btc",
+      quantity: "1",
+      price_amount: "8",
+      currency: "USDT"
+    )
+    duplicate = @service.create(
+      actor_user_id: @broker.id,
+      sku: "btc",
+      quantity: "1",
+      price_amount: "8.5",
+      currency: "UAH"
+    )
+    @service.create(
+      actor_user_id: @other_broker.id,
+      sku: "btc",
+      quantity: "1",
+      price_amount: "8.75",
+      currency: "USDT"
+    )
+
+    best_feedback = @service.routing_feedback(
+      actor_user_id: @broker.id,
+      listing_id: best.id,
+      client_unit_price_usdt: "10"
+    )
+    duplicate_feedback = @service.routing_feedback(
+      actor_user_id: @broker.id,
+      listing_id: duplicate.id,
+      client_unit_price_usdt: "10"
+    )
+
+    assert_equal 2, best_feedback.eligible_supply_count
+    assert_equal BigDecimal("0.8"), best_feedback.estimated_order_share
+    assert_equal "superseded", duplicate_feedback.execution_status
+    assert_equal "superseded", duplicate_feedback.routing_status
+    assert_equal BigDecimal("0"), duplicate_feedback.estimated_order_share
+  end
+
+  def test_excludes_unprofitable_supply_before_reserving_inventory
     listing = @service.create(
       actor_user_id: @broker.id,
       sku: "btc",
@@ -237,7 +339,7 @@ class ListingsServiceTest < Minitest::Test
       )
     end
 
-    assert_equal "quote_reprice_required", error.code
+    assert_equal "insufficient_liquidity", error.code
     unchanged = @service.list_owned(actor_user_id: @broker.id).fetch(0)
     assert_equal listing.quantity, unchanged.available_quantity
     assert_equal BigDecimal("0"), unchanged.reserved_quantity

@@ -151,11 +151,17 @@ module ZeroXDA
           end
 
           def broker_listings(request)
-            listings = @listings.list_owned(actor_user_id: request.params["actor_user_id"])
+            actor_user_id = request.params["actor_user_id"]
+            listings = @listings.list_owned(actor_user_id: actor_user_id)
             json_response(
               200,
               {
-                "data" => listings.map { |listing| present_listing(listing) },
+                "data" => listings.map do |listing|
+                  present_listing(
+                    listing,
+                    routing: broker_routing(listing, actor_user_id: actor_user_id)
+                  )
+                end,
                 "meta" => { "count" => listings.length }
               }
             )
@@ -170,7 +176,13 @@ module ZeroXDA
               price_amount: body.fetch("price_amount"),
               currency: body.fetch("currency")
             )
-            resource_response(201, present_listing(listing))
+            resource_response(
+              201,
+              present_listing(
+                listing,
+                routing: broker_routing(listing, actor_user_id: body.fetch("actor_user_id"))
+              )
+            )
           end
 
           def update_broker_listing(request, id:)
@@ -183,7 +195,13 @@ module ZeroXDA
               currency: body.fetch("currency"),
               expected_version: body.fetch("version")
             )
-            resource_response(200, present_listing(listing))
+            resource_response(
+              200,
+              present_listing(
+                listing,
+                routing: broker_routing(listing, actor_user_id: body.fetch("actor_user_id"))
+              )
+            )
           end
 
           def withdraw_broker_listing(request, id:)
@@ -373,16 +391,19 @@ module ZeroXDA
             }
           end
 
-          def available_minimum_client_prices_usdt
-            @listings&.minimum_available_client_prices_usdt
+          def available_executable_skus(prices)
+            return unless @listings&.respond_to?(:executable_skus)
+
+            @listings.executable_skus(
+              client_unit_prices_usdt: prices.transform_values(&:amount_usdt)
+            ).to_h { |sku| [sku, true] }
           end
 
-          def effective_client_price_amount(price, sku:, minimum_prices:)
+          def effective_client_price_amount(price, sku:, executable_skus:)
             return nil unless price
-            return price.amount_usdt if minimum_prices.nil?
+            return price.amount_usdt if executable_skus.nil?
 
-            floor = minimum_prices[sku]
-            floor && [price.amount_usdt, floor].max
+            price.amount_usdt if executable_skus.key?(sku)
           end
 
           def present_effective_client_price(price, amount_usdt:, currency:)
@@ -435,8 +456,8 @@ module ZeroXDA
             }
           end
 
-          def present_listing(listing)
-            {
+          def present_listing(listing, routing: nil)
+            resource = {
               "type" => "broker_listing",
               "id" => listing.id,
               "attributes" => {
@@ -448,6 +469,35 @@ module ZeroXDA
                 "created_at" => timestamp(listing.created_at),
                 "updated_at" => timestamp(listing.updated_at),
                 "version" => listing.version
+              }
+            }
+            resource.fetch("attributes")["routing"] = present_broker_routing(routing) if routing
+            resource
+          end
+
+          def broker_routing(listing, actor_user_id:)
+            return unless @pricing && @listings.respond_to?(:routing_feedback)
+
+            price = @pricing.current_prices[listing.sku]
+            return unless price
+
+            @listings.routing_feedback(
+              actor_user_id: actor_user_id,
+              listing_id: listing.id,
+              client_unit_price_usdt: price.amount_usdt
+            )
+          end
+
+          def present_broker_routing(routing)
+            {
+              "execution_status" => routing.execution_status,
+              "status" => routing.routing_status,
+              "estimated_order_share" => decimal_string(routing.estimated_order_share),
+              "eligible_supply_count" => routing.eligible_supply_count,
+              "sale_price_usdt" => routing.sale_price_usdt && decimal_string(routing.sale_price_usdt),
+              "maximum_ask" => routing.maximum_ask_amount && {
+                "amount" => decimal_string(routing.maximum_ask_amount),
+                "currency" => routing.maximum_ask_currency
               }
             }
           end

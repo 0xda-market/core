@@ -21,11 +21,11 @@ A market product is actionable only when the same live bootstrap observes both a
 A product is buyer-available only when both conditions hold at snapshot generation time:
 
 - an applied client price exists;
-- at least one active broker listing has available inventory and a supply price that can be normalized to USDT.
+- at least one active broker listing has available inventory, a current FX-normalizable ask and positive required margin at the administrator sale price.
 
-The applied client price is the administrator-controlled floor. The buyer-facing unit price is the greater of that floor and the minimum profitable price derived from the cheapest normalized active listing. Catalog pricing assumes quantity `1`; quote creation recalculates the floor for the requested quantity and a listing capable of fulfilling it.
+The applied client price is the administrator-controlled sale price. Broker asks never change it. Catalog availability checks profitability for quantity `1`; quote creation revalidates the same sale price against listings capable of fulfilling the complete requested quantity.
 
-The snapshot emits `attributes.available` explicitly and omits the public price when either condition is false. It returns only the effective client price; broker identity, individual supply prices, policy inputs and inventory allocation details remain private. Quote creation recomputes the quantity-aware floor and validates positive net margin again while locking current listing rows, so the snapshot is presentation state rather than settlement authority.
+The snapshot emits `attributes.available` explicitly. A listed product whose current supply is not executable remains visible with its administrator price and `available: false`; an unlisted product omits the public price. Broker identity, individual supply prices, policy inputs and inventory allocation details remain private. Quote creation validates positive net margin again while locking current listing rows, so the snapshot is presentation state rather than settlement authority.
 
 The public snapshot excludes internal audit identities. Browsing state is not settlement authority: quote, acceptance and order operations always revalidate current server state.
 

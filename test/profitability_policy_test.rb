@@ -46,6 +46,25 @@ class ProfitabilityPolicyTest < Minitest::Test
     )
   end
 
+  def test_derives_the_maximum_broker_ask_without_rounding_above_the_boundary
+    maximum = @policy.maximum_supply_unit_cost_usdt(
+      client_unit_price_usdt: "111.956522",
+      quantity: "1"
+    )
+
+    assert_equal BigDecimal("100.00000023"), maximum
+    assert @policy.profitable?(
+      client_total_usdt: "111.956522",
+      supply_unit_cost_usdt: maximum,
+      quantity: "1"
+    )
+    refute @policy.profitable?(
+      client_total_usdt: "111.956522",
+      supply_unit_cost_usdt: maximum + BigDecimal("0.00000001"),
+      quantity: "1"
+    )
+  end
+
   def test_rejects_a_non_positive_margin_or_insolvent_rate_sum
     assert_raises(ArgumentError) do
       ZeroXDA::Market::Pricing::ProfitabilityPolicy.new(minimum_margin_bps: 0)

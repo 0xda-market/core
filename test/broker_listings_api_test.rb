@@ -14,6 +14,13 @@ require "zero_x_da/market/transport/json_api"
 
 class BrokerListingsAPITest < Minitest::Test
   include KernelFixture
+  Price = Struct.new(:amount_usdt, keyword_init: true)
+
+  class Pricing
+    def current_prices
+      { "ton" => Price.new(amount_usdt: BigDecimal("4")) }
+    end
+  end
 
   def setup
     clock = MutableClock.new
@@ -41,7 +48,11 @@ class BrokerListingsAPITest < Minitest::Test
       id_generator: SequenceIDs.new
     )
     @client = Rack::MockRequest.new(
-      ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, listings: listings)
+      ZeroXDA::Market::Transport::JSONAPI.new(
+        kernel: kernel,
+        listings: listings,
+        pricing: Pricing.new
+      )
     )
   end
 
@@ -56,6 +67,10 @@ class BrokerListingsAPITest < Minitest::Test
 
     assert_equal "12.500000000001", created.dig("attributes", "quantity")
     assert_equal "3.12345678", created.dig("attributes", "price_amount")
+    assert_equal "best", created.dig("attributes", "routing", "status")
+    assert_equal "1.0", created.dig("attributes", "routing", "estimated_order_share")
+    assert_equal "4.0", created.dig("attributes", "routing", "sale_price_usdt")
+    assert_equal "3.92079207", created.dig("attributes", "routing", "maximum_ask", "amount")
 
     listed = JSON.parse(@client.get(
       "/v1/broker/listings?actor_user_id=#{@broker.id}"

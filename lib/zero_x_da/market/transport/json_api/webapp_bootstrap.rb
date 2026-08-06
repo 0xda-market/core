@@ -19,11 +19,11 @@ module ZeroXDA
             locale = @request_parser.requested_locale(request)
             products = @catalog.products(locale: locale)
             prices = @pricing ? @pricing.current_prices : {}
-            minimum_prices = available_minimum_client_prices_usdt
+            executable_skus = available_executable_skus(prices)
             listed_skus = if @listings&.respond_to?(:available_skus)
                             @listings.available_skus.to_h { |sku| [sku, true] }
-                          elsif minimum_prices
-                            minimum_prices.transform_values { true }
+                          elsif executable_skus
+                            executable_skus
                           end
             data = products.map do |product|
               price = prices[product.sku]
@@ -31,7 +31,7 @@ module ZeroXDA
               amount_usdt = effective_client_price_amount(
                 price,
                 sku: product.sku,
-                minimum_prices: minimum_prices
+                executable_skus: executable_skus
               )
               available = listed && !amount_usdt.nil?
               visible_amount_usdt = amount_usdt || (price&.amount_usdt if listed)

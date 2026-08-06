@@ -48,7 +48,8 @@ and enforced by architecture tests.
 - provider-neutral users and external identities;
 - internal-UUID administrator authorization;
 - localized product catalog and append-only price history;
-- execution-aware client pricing with a server-side positive-margin gate;
+- fixed administrator client pricing with a server-side positive-margin supply gate;
+- private price-ranked broker routing with bounded reserve traffic;
 - provider-backed, append-only FX snapshots with a hard freshness gate;
 - exact localized conversion followed by currency-aware upward presentation;
 - broker-owned asset listings with exact quantity and price amounts;

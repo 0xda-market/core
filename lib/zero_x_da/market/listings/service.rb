@@ -6,12 +6,23 @@ require_relative "../core/contracts"
 require_relative "../pricing/profitability_policy"
 require_relative "listing"
 require_relative "reservation"
+require_relative "supply_routing_policy"
 
 module ZeroXDA
   module Market
     module Listings
       class Service
         SELLER_ROLES = %w[broker admin].freeze
+        RoutingFeedback = Struct.new(
+          :execution_status,
+          :routing_status,
+          :estimated_order_share,
+          :eligible_supply_count,
+          :sale_price_usdt,
+          :maximum_ask_amount,
+          :maximum_ask_currency,
+          keyword_init: true
+        )
 
         def initialize(
           store:,
@@ -19,6 +30,7 @@ module ZeroXDA
           catalog:,
           localization: nil,
           profitability: Pricing::ProfitabilityPolicy.new,
+          routing: SupplyRoutingPolicy.new,
           clock: -> { Time.now.utc },
           id_generator: SecureRandom.method(:uuid)
         )
@@ -27,13 +39,17 @@ module ZeroXDA
           @catalog = catalog
           @localization = localization
           @profitability = profitability
+          @routing = routing
           @clock = clock
           @id_generator = id_generator
         end
 
         def list_owned(actor_user_id:)
           actor = active_seller(actor_user_id)
-          @store.list_by_seller(actor.id, status: "active")
+          @store.transaction do |store|
+            release_expired(store, current_time)
+            store.list_by_seller(actor.id, status: "active")
+          end
         end
 
         def available_skus(currency: nil)
@@ -44,37 +60,41 @@ module ZeroXDA
           end
         end
 
-        # Catalog prices are derived from the cheapest currently executable
-        # supply cost, not from an arbitrary high broker ask. The policy adds
-        # the configured cost buffer, fees and minimum net margin.
-        def minimum_available_client_prices_usdt
+        # Availability is determined against the administrator's sale price.
+        # Broker asks never alter the buyer price; unprofitable supply simply
+        # cannot execute.
+        def executable_skus(client_unit_prices_usdt:, quantity: 1)
+          requested_quantity = quantity_value(quantity)
+          prices = client_unit_prices_usdt.transform_keys(&:to_s)
           @store.transaction do |store|
             release_expired(store, current_time)
-            lowest_supply_costs_usdt(store.available_listings).transform_values do |cost|
-              @profitability.minimum_client_unit_price_usdt(
-                supply_unit_cost_usdt: cost,
-                quantity: 1
+            store.available_listings.filter_map do |listing|
+              next if listing.available_quantity < requested_quantity
+
+              client_unit_price = prices[listing.sku]
+              supply_cost = normalized_supply_cost(listing)
+              next unless client_unit_price && supply_cost
+              next unless profitable_supply?(
+                client_unit_price,
+                supply_cost,
+                requested_quantity
               )
-            end
+
+              listing.sku
+            end.uniq.sort
           end
         end
 
-        # Quote pricing is quantity-aware because a listing must be able to
-        # satisfy the full MVP allocation and fixed execution cost is paid once.
-        def minimum_executable_client_price_usdt(sku:, quantity:)
-          product = marketable_product(sku)
-          requested_quantity = quantity_value(quantity)
+        def routing_feedback(actor_user_id:, listing_id:, client_unit_price_usdt:)
+          actor = active_seller(actor_user_id)
+          requested_quantity = BigDecimal("1")
           @store.transaction do |store|
             release_expired(store, current_time)
-            candidate = priced_listings(
-              store.available_listings(sku: product.sku).select do |listing|
-                listing.available_quantity >= requested_quantity
-              end
-            ).min_by { |listing, cost| [cost, listing.created_at, listing.id] }
-            next unless candidate
-
-            @profitability.minimum_client_unit_price_usdt(
-              supply_unit_cost_usdt: candidate.fetch(1),
+            listing = owned_listing(store, actor, listing_id)
+            feedback_for(
+              listing,
+              store: store,
+              client_unit_price_usdt: client_unit_price_usdt,
               quantity: requested_quantity
             )
           end
@@ -179,9 +199,16 @@ module ZeroXDA
               listing.available_quantity >= requested_quantity
             end
             candidates = candidates.select { |entry| entry.currency == normalized_currency } if normalized_currency
-            selected = priced_listings(candidates).min_by do |entry, cost|
-              [cost, entry.created_at, entry.id]
+            executable = priced_listings(candidates).filter_map do |entry, cost|
+              next unless @profitability.profitable?(
+                client_total_usdt: client_total_price_usdt,
+                supply_unit_cost_usdt: cost,
+                quantity: requested_quantity
+              )
+
+              SupplyRoutingPolicy::Candidate.new(listing: entry, cost_usdt: cost)
             end
+            selected = @routing.select(executable, seed: quote_id)
             unless selected
               raise Core::Conflict.new(
                 "insufficient broker liquidity",
@@ -193,7 +220,8 @@ module ZeroXDA
                 }.compact
               )
             end
-            listing, supply_unit_cost_usdt = selected
+            listing = selected.listing
+            supply_unit_cost_usdt = selected.cost_usdt
             ensure_profitable_quote!(
               client_total_price_usdt,
               product.sku,
@@ -405,21 +433,96 @@ module ZeroXDA
           @localization.amount_usdt(amount: listing.price_amount, currency: listing.currency)
         end
 
-        def lowest_supply_costs_usdt(listings)
-          listings.each_with_object({}) do |listing, costs|
-            normalized = normalized_supply_cost(listing)
-            next unless normalized
-
-            current = costs[listing.sku]
-            costs[listing.sku] = normalized if current.nil? || normalized < current
-          end
-        end
-
         def priced_listings(listings)
           listings.filter_map do |listing|
             cost = normalized_supply_cost(listing)
             cost && [listing, cost]
           end
+        end
+
+        def profitable_supply?(client_unit_price_usdt, supply_unit_cost_usdt, quantity)
+          @profitability.profitable?(
+            client_total_usdt: BigDecimal(client_unit_price_usdt.to_s) * quantity,
+            supply_unit_cost_usdt: supply_unit_cost_usdt,
+            quantity: quantity
+          )
+        rescue ArgumentError, TypeError
+          false
+        end
+
+        def feedback_for(listing, store:, client_unit_price_usdt:, quantity:)
+          sale_price = BigDecimal(client_unit_price_usdt.to_s)
+          maximum_usdt = @profitability.maximum_supply_unit_cost_usdt(
+            client_unit_price_usdt: sale_price,
+            quantity: quantity
+          )
+          maximum_ask = maximum_usdt && amount_from_usdt(
+            maximum_usdt,
+            currency: listing.currency
+          )
+          candidates = executable_candidates(
+            store.available_listings(sku: listing.sku),
+            client_unit_price_usdt: sale_price,
+            quantity: quantity
+          )
+          positions = @routing.positions(candidates)
+          position = positions.find { |entry| entry.candidate.listing.id == listing.id }
+          supply_cost = normalized_supply_cost(listing)
+          superseded = !position && listing.available_quantity >= quantity && supply_cost &&
+                       profitable_supply?(sale_price, supply_cost, quantity)
+          execution_status = if position
+                               "executable"
+                             elsif superseded
+                               "superseded"
+                             else
+                               "not_executable"
+                             end
+
+          RoutingFeedback.new(
+            execution_status: execution_status,
+            routing_status: position&.status || execution_status,
+            estimated_order_share: position&.estimated_share || BigDecimal("0"),
+            eligible_supply_count: positions.length,
+            sale_price_usdt: sale_price,
+            maximum_ask_amount: maximum_ask,
+            maximum_ask_currency: maximum_ask && listing.currency
+          ).freeze
+        rescue ArgumentError, TypeError
+          RoutingFeedback.new(
+            execution_status: "not_executable",
+            routing_status: "not_executable",
+            estimated_order_share: BigDecimal("0"),
+            eligible_supply_count: 0,
+            sale_price_usdt: nil,
+            maximum_ask_amount: nil,
+            maximum_ask_currency: nil
+          ).freeze
+        end
+
+        def executable_candidates(listings, client_unit_price_usdt:, quantity:)
+          candidates = priced_listings(listings).filter_map do |listing, cost|
+            next if listing.available_quantity < quantity
+            next unless profitable_supply?(client_unit_price_usdt, cost, quantity)
+
+            SupplyRoutingPolicy::Candidate.new(listing: listing, cost_usdt: cost)
+          end
+          candidates.group_by { |candidate| candidate.listing.seller_user_id }
+                    .values
+                    .map do |seller_candidates|
+            seller_candidates.min_by do |candidate|
+              listing = candidate.listing
+              [candidate.cost_usdt, listing.created_at, listing.id]
+            end
+          end
+        end
+
+        def amount_from_usdt(amount_usdt, currency:)
+          value = if currency == "USDT"
+                    amount_usdt
+                  elsif @localization&.supported_currency?(currency)
+                    @localization.convert(amount_usdt: amount_usdt, currency: currency)
+                  end
+          value&.round(8, BigDecimal::ROUND_FLOOR)
         end
 
         def ensure_profitable_quote!(client_total_price_usdt, sku, supply_unit_cost_usdt, quantity)

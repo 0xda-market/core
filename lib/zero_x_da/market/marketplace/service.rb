@@ -54,22 +54,7 @@ module ZeroXDA
           end
 
           requested_quantity = quantity_value(quantity)
-          price_floor = @listings.minimum_executable_client_price_usdt(
-            sku: product.sku,
-            quantity: requested_quantity
-          )
-          unless price_floor
-            raise Core::Conflict.new(
-              "insufficient broker liquidity",
-              code: "insufficient_liquidity",
-              details: {
-                sku: product.sku,
-                quantity: requested_quantity.to_s("F")
-              }
-            )
-          end
-
-          unit_price = [price.amount_usdt, price_floor].max.round(
+          unit_price = price.amount_usdt.round(
             CLIENT_PRICE_SCALE,
             BigDecimal::ROUND_CEILING
           )

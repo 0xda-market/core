@@ -35,8 +35,8 @@ class WebAppListedVisibilityTest < Minitest::Test
       ["premium_12m"]
     end
 
-    def minimum_available_client_prices_usdt
-      {}
+    def executable_skus(client_unit_prices_usdt:)
+      []
     end
   end
 

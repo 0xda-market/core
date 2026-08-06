@@ -49,17 +49,19 @@ The service:
 
 1. verifies an active, marketable product and active client price;
 2. releases expired reservations in the same store transaction;
-3. normalizes broker prices to USDT and selects the cheapest listing able to execute the full requested quantity;
-4. calculates the minimum profitable client price for that executable supply;
-5. uses the greater of the administrator floor and the profitability floor to create the provider quote;
-6. locks current listing rows and reselects the cheapest eligible supply;
-7. rejects a quote as `quote_reprice_required` when its revenue no longer satisfies the profitability policy;
+3. fixes the provider quote at the administrator's current sale price;
+4. locks active listings able to execute the full requested quantity;
+5. normalizes broker asks to USDT and rejects asks that fail the profitability policy at that fixed sale price;
+6. ranks profitable supply by ask and uses the quote ID to select the `best`, `competitive` or reserve traffic tier;
+7. revalidates positive margin for the selected listing before mutation;
 8. moves the exact quantity from available to reserved inventory;
 9. persists the listing ID, customer ID, quote ID, quantity, supply-price snapshot and expiration.
 
 The MVP intentionally uses one listing per quote. The reservation contract can be extended later with multi-listing allocation without changing the buyer API.
 
-An expensive listing never changes the client price while cheaper executable liquidity remains available. If that liquidity disappears between price calculation and row locking, core either proves the existing quote still meets the policy against the new cheapest supply or rejects it before inventory or an order is created. Once inventory is reserved, later listing edits do not change the quote.
+An expensive listing never changes the client price. If no current listing can execute profitably at the administrator price, quote creation returns `insufficient_liquidity` before inventory or an order is created. Once inventory is reserved, later listing or administrator price edits do not change the quote.
+
+Routing shares and broker-facing feedback are defined in [Broker supply routing](broker-supply-routing.md).
 
 ## Profitability policy
 
@@ -86,7 +88,7 @@ Runtime parameters are provider-neutral:
 - `MARKETPLACE_VARIABLE_FEE_BPS` — payment or settlement fees charged as a revenue percentage; default `0`;
 - `MARKETPLACE_FIXED_COST_USDT` — fixed cost allocated once per quote; default `0`.
 
-Catalog prices use quantity `1`. Exact quote pricing is quantity-aware, so a fixed order cost is amortized across the requested quantity. All four inputs are server-controlled and never accepted from browser or channel payloads.
+Catalog eligibility uses quantity `1`. Exact quote eligibility is quantity-aware, so a fixed order cost is amortized across the requested quantity. All four inputs are server-controlled and never accepted from browser or channel payloads.
 
 ## Quote acceptance
 

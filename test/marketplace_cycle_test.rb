@@ -198,18 +198,19 @@ class MarketplaceCycleTest < Minitest::Test
     )
   end
 
-  def test_raises_an_underpriced_admin_floor_to_the_minimum_profitable_price
+  def test_rejects_supply_that_cannot_execute_at_the_fixed_admin_price
     @pricing.apply_price(sku: "premium_3m", amount_usdt: "8")
 
-    quoted = @marketplace.quote(
-      customer_user_id: @client.id,
-      sku: "premium_3m",
-      quantity: "1"
-    )
+    error = assert_raises(ZeroXDA::Market::Core::Conflict) do
+      @marketplace.quote(
+        customer_user_id: @client.id,
+        sku: "premium_3m",
+        quantity: "1"
+      )
+    end
 
-    assert_equal BigDecimal("10.277778"), quoted.unit_price_usdt
-    assert_equal BigDecimal("10.277778"), quoted.total_price_usdt
-    assert_equal @listing.id, quoted.reservation.listing_id
+    assert_equal "insufficient_liquidity", error.code
+    assert_equal BigDecimal("3"), @listings.list_owned(actor_user_id: @broker.id).first.available_quantity
   end
 
   def test_prices_against_the_cheapest_listing_that_can_fill_the_complete_quantity
@@ -228,7 +229,7 @@ class MarketplaceCycleTest < Minitest::Test
       price_amount: "14.75",
       currency: "USDT"
     )
-    @pricing.apply_price(sku: "premium_3m", amount_usdt: "8")
+    @pricing.apply_price(sku: "premium_3m", amount_usdt: "20")
 
     quoted = @marketplace.quote(
       customer_user_id: @client.id,
@@ -236,8 +237,8 @@ class MarketplaceCycleTest < Minitest::Test
       quantity: "2"
     )
 
-    assert_equal BigDecimal("16.388889"), quoted.unit_price_usdt
-    assert_equal BigDecimal("32.777778"), quoted.total_price_usdt
+    assert_equal BigDecimal("20"), quoted.unit_price_usdt
+    assert_equal BigDecimal("40"), quoted.total_price_usdt
     assert_equal larger.id, quoted.reservation.listing_id
   end
 

@@ -81,6 +81,22 @@ module ZeroXDA
           profit.positive? && (profit / revenue) >= minimum_margin_rate
         end
 
+        # Inverts the profitability contract for broker guidance and listing
+        # eligibility. The result is rounded down to the broker price storage
+        # scale, so displaying it can never suggest an insolvent ask.
+        def maximum_supply_unit_cost_usdt(client_unit_price_usdt:, quantity:)
+          client_unit_price = positive_decimal(client_unit_price_usdt, field: "client unit price")
+          requested_quantity = positive_decimal(quantity, field: "quantity")
+          revenue = client_unit_price * requested_quantity
+          available_for_buffered_supply =
+            revenue * (1 - variable_fee_rate - minimum_margin_rate) - fixed_cost_usdt
+          return nil unless available_for_buffered_supply.positive?
+
+          maximum = available_for_buffered_supply /
+                    (requested_quantity * (1 + supply_buffer_rate))
+          maximum.round(8, BigDecimal::ROUND_FLOOR)
+        end
+
         private
 
         def minimum_margin_rate

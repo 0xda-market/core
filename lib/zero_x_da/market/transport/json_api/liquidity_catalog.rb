@@ -10,20 +10,15 @@ module ZeroXDA
             locale = @request_parser.requested_locale(request)
             products = @catalog.products(locale: locale)
             prices = @pricing ? @pricing.current_prices : {}
-            minimum_prices = available_minimum_client_prices_usdt
+            executable_skus = available_executable_skus(prices)
             data = products.map do |product|
               resource = present_product(product)
-              available = minimum_prices.nil? || minimum_prices.key?(product.sku)
+              available = executable_skus.nil? || executable_skus.key?(product.sku)
               price = prices[product.sku]
-              amount_usdt = available && effective_client_price_amount(
-                price,
-                sku: product.sku,
-                minimum_prices: minimum_prices
-              )
               resource["attributes"]["available"] = available
-              resource["attributes"]["price"] = amount_usdt && present_effective_client_price(
+              resource["attributes"]["price"] = price && present_effective_client_price(
                 price,
-                amount_usdt: amount_usdt,
+                amount_usdt: price.amount_usdt,
                 currency: currency
               )
               resource
@@ -44,8 +39,8 @@ module ZeroXDA
 
           private
 
-          def present_listing(listing)
-            resource = super
+          def present_listing(listing, **options)
+            resource = super(listing, **options)
             resource.fetch("attributes").merge!(
               "available_quantity" => decimal_string(listing.available_quantity),
               "reserved_quantity" => decimal_string(listing.reserved_quantity),

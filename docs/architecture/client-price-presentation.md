@@ -4,14 +4,14 @@ Core keeps profitability and settlement math in USDT, then converts the protecte
 
 ```text
 step 0: fresh persisted FX snapshot
-  -> profitability-protected USDT amount
+  -> fixed administrator sale price in USDT
 step 1:
   -> exact FX conversion
   -> currency-aware upward presentation
   -> client-visible amount
 ```
 
-Presentation never rounds down. It therefore cannot reduce the administrator floor, the executable-supply floor or the configured market margin.
+Presentation never rounds down. It therefore cannot reduce the administrator sale price or the configured market margin.
 
 Initial rules are deliberately explicit:
 

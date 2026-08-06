@@ -63,6 +63,33 @@ module ZeroXDA
           end
         end
 
+        def test_rejects_a_provider_rate_after_its_runtime_ttl
+          clock = MutableClock.new(NOW)
+          store = Catalog::MemoryStore.new(
+            products: [
+              currency(
+                "uah",
+                "UAH",
+                price: "0.024",
+                price_updated_at: NOW,
+                position: 102
+              )
+            ]
+          )
+          service = Service.new(
+            catalog: Catalog::Service.new(store: store),
+            clock: clock,
+            max_rate_age_seconds: 3600
+          )
+
+          assert service.supported_currency?("UAH")
+          clock.advance(3601)
+          refute service.supported_currency?("UAH")
+          assert_raises(ArgumentError) do
+            service.convert(amount_usdt: "10", currency: "UAH")
+          end
+        end
+
         def test_unknown_currency_is_rejected
           assert_raises(ArgumentError) do
             @service.convert(amount_usdt: "10", currency: "EUR")
@@ -99,7 +126,7 @@ module ZeroXDA
           )
         end
 
-        def currency(sku, code, price:, position:, locales: [])
+        def currency(sku, code, price:, position:, locales: [], price_updated_at: nil)
           Catalog::Product.new(
             sku: sku,
             short_name: code,
@@ -113,6 +140,7 @@ module ZeroXDA
               "locales" => locales
             },
             current_price_usdt: price,
+            price_updated_at: price_updated_at,
             created_at: NOW
           )
         end

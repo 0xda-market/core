@@ -20,9 +20,16 @@ module ZeroXDA
           "uk" => "uk_UA"
         }.freeze
 
-        def initialize(catalog:, client_price_presentation: Pricing::ClientPricePresentationPolicy.new)
+        def initialize(
+          catalog:,
+          client_price_presentation: Pricing::ClientPricePresentationPolicy.new,
+          clock: -> { Time.now.utc },
+          max_rate_age_seconds: nil
+        )
           @catalog = catalog
           @client_price_presentation = client_price_presentation
+          @clock = clock
+          @max_rate_age_seconds = normalize_max_rate_age(max_rate_age_seconds)
         end
 
         # Unsupported languages fall back to the default instead of failing:
@@ -99,11 +106,39 @@ module ZeroXDA
 
         private
 
-        # A currency becomes usable once it has an applied price (= rate).
+        # A currency becomes usable once it has an applied price (= rate). In
+        # configured runtimes, provider-managed rates also have a hard TTL so a
+        # long upstream outage cannot silently produce stale buyer prices.
         def rate_for(code)
           currencies.find do |currency|
-            currency.currency_code == code && currency.current_price_usdt
+            currency.currency_code == code && currency.current_price_usdt && fresh_rate?(currency)
           end&.current_price_usdt
+        end
+
+        def fresh_rate?(currency)
+          return true if @max_rate_age_seconds.nil?
+          return false unless currency.price_updated_at
+
+          age = current_time - currency.price_updated_at
+          age >= 0 && age <= @max_rate_age_seconds
+        end
+
+        def normalize_max_rate_age(value)
+          return nil if value.nil?
+
+          seconds = Integer(value)
+          raise ArgumentError unless seconds.positive?
+
+          seconds
+        rescue ArgumentError, TypeError
+          raise ArgumentError, "max_rate_age_seconds must be a positive integer"
+        end
+
+        def current_time
+          value = @clock.call
+          raise ArgumentError, "clock must return a Time" unless value.is_a?(Time)
+
+          value.getutc
         end
 
         def normalize_currency(currency)

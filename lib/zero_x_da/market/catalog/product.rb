@@ -94,7 +94,7 @@ module ZeroXDA
           amount = value.is_a?(BigDecimal) ? value : BigDecimal(value.to_s)
           raise ArgumentError, "current_price_usdt must be positive" unless amount.finite? && amount.positive?
 
-          amount.round(6)
+          amount.round(12)
         rescue ArgumentError
           raise ArgumentError, "current_price_usdt must be a positive number"
         end

@@ -252,7 +252,8 @@ class PostgresPersistenceTest < Minitest::Test
       currency: "USDT"
     )
     assert_equal ["btc"], service.executable_skus(
-      client_unit_prices_usdt: { "btc" => BigDecimal("70000") }
+      client_unit_prices_usdt: { "btc" => BigDecimal("70000") },
+      quantity: "0.25"
     )
 
     @database.disconnect

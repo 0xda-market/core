@@ -8,6 +8,7 @@ module ZeroXDA
     module Pricing
       class Price
         SOURCES = %w[admin core].freeze
+        FX_SOURCE_PATTERN = /\Afx:[a-z0-9][a-z0-9._-]{0,63}\z/
         MAX_AMOUNT = BigDecimal("1000000000")
 
         attr_reader :id,
@@ -28,7 +29,9 @@ module ZeroXDA
           @id = normalize_id(id)
           @sku = non_empty_string(sku, field: "sku")
           @amount_usdt = decimal(amount_usdt)
-          raise ArgumentError, "price source is invalid" unless SOURCES.include?(source)
+          unless SOURCES.include?(source) || FX_SOURCE_PATTERN.match?(source.to_s)
+            raise ArgumentError, "price source is invalid"
+          end
 
           @source = source.dup.freeze
           @set_by_user_id = optional_string(
@@ -65,7 +68,7 @@ module ZeroXDA
           end
           raise ArgumentError, "amount_usdt is too large" if amount > MAX_AMOUNT
 
-          amount.round(6)
+          amount.round(12)
         end
 
         def parse_decimal(value)

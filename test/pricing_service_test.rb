@@ -75,6 +75,17 @@ module ZeroXDA
           end
         end
 
+        def test_accepts_an_auditable_fx_provider_source
+          price = @service.apply_price(
+            sku: "premium_3m",
+            amount_usdt: "0.022385421337",
+            source: "fx:coinbase"
+          )
+
+          assert_equal "fx:coinbase", price.source
+          assert_equal BigDecimal("0.022385421337"), price.amount_usdt
+        end
+
         def test_proposal_separates_current_and_previous_day_prices
           @now = Time.utc(2026, 7, 14, 9, 0, 0)
           @service.apply_price(sku: "premium_3m", amount_usdt: "12.10")

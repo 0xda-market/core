@@ -26,6 +26,38 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  fx-refresh:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    command:
+      - bundle
+      - exec
+      - ruby
+      - bin/refresh_fx_rates_loop
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - edge
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   mcp-control:
     image: alpine:3.22
     restart: unless-stopped

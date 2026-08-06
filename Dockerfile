@@ -30,7 +30,7 @@ ENV BUNDLE_DEPLOYMENT=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends libpq5 \
+    && apt-get install --yes --no-install-recommends ca-certificates libpq5 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system app \
     && useradd --system --gid app --home-dir /app app

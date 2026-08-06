@@ -49,6 +49,8 @@ and enforced by architecture tests.
 - internal-UUID administrator authorization;
 - localized product catalog and append-only price history;
 - execution-aware client pricing with a server-side positive-margin gate;
+- provider-backed, append-only FX snapshots with a hard freshness gate;
+- exact localized conversion followed by currency-aware upward presentation;
 - broker-owned asset listings with exact quantity and price amounts;
 - PostgreSQL and in-memory adapters;
 - health-gated development VPS deployment with Caddy HTTPS and bot routing.
@@ -233,6 +235,14 @@ when the cheapest executable broker supply would otherwise miss the configured
 net margin. `MARKETPLACE_VARIABLE_FEE_BPS` and
 `MARKETPLACE_FIXED_COST_USDT` add provider-neutral variable and fixed execution
 costs; both default to zero until a settlement adapter supplies a cost contract.
+
+FX acquisition is step 0 of localized pricing. A separate `fx-refresh` process
+reads Coinbase's public USDT exchange-rate snapshot every five minutes, inverts
+it into the core `USDT per unit` contract and appends the complete set with
+provider provenance. API requests use only persisted rates. Non-USDT conversion
+fails closed when the latest rate exceeds `FX_RATE_MAX_AGE_SECONDS` (one hour by
+default); client-facing smart rounding then runs as step 1. See
+[`docs/architecture/fx-rate-refresh.md`](docs/architecture/fx-rate-refresh.md).
 
 ## Public API lifecycle
 

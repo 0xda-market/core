@@ -214,6 +214,8 @@ through a subsequent deployment and a reboot check:
 - authenticated catalog access;
 - admin-only operations;
 - the scheduled price digest, when production scheduling is enabled;
+- `docker compose logs --tail 100 fx-refresh` reports successful complete FX
+  snapshots or the next bounded retry after a provider failure;
 - verified database and runtime-secret recovery paths.
 
 Disabling or deleting the previous host is a separate irreversible operation and

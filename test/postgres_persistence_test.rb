@@ -93,7 +93,7 @@ class PostgresPersistenceTest < Minitest::Test
         007_product_catalog_localizations 008_legacy_catalog_rollback_window
         009_currencies_as_products 010_broker_listings
         011_marketplace_inventory 012_payment_aware_orders
-        013_broker_order_decisions
+        013_broker_order_decisions 014_automated_fx_rates
       ],
       versions
     )
@@ -137,14 +137,14 @@ class PostgresPersistenceTest < Minitest::Test
     store = ZeroXDA::Market::Catalog::PostgresStore.new(database: @database)
 
     currencies = store.list_products(status: "active", marketable: false)
-    assert_equal %w[usdt usd uah rub], currencies.map(&:sku)
+    assert_equal %w[usdt usd uah rub eur gbp chf pln czk huf], currencies.map(&:sku)
     refute currencies.any?(&:marketable?)
     assert currencies.all?(&:currency?)
 
     usdt = currencies.find { |currency| currency.sku == "usdt" }
     assert_equal BigDecimal("1"), usdt.current_price_usdt
 
-    assert_equal 13, store.list_products(status: "active", marketable: nil).length
+    assert_equal 19, store.list_products(status: "active", marketable: nil).length
   end
 
   def test_product_price_snapshot_tracks_internal_editor_and_history

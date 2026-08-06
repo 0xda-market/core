@@ -82,6 +82,8 @@ jobs:
       - name: Validate operational scripts
         run: |
           ruby -c bin/bootstrap_admin
+          ruby -c bin/refresh_fx_rates
+          ruby -c bin/refresh_fx_rates_loop
           bash -n bin/check_documented_repositories
           bash -n deploy/vps/bootstrap-ubuntu.sh
           bash -n deploy/vps/deploy.sh
@@ -113,6 +115,7 @@ jobs:
           ENV
           services="$(docker compose --file deploy/vps/compose.yaml --env-file deploy/vps/.env config --services)"
           grep -qx api <<<"$services"
+          grep -qx fx-refresh <<<"$services"
           grep -qx mcp-control <<<"$services"
           ! grep -qx caddy <<<"$services"
           ! grep -R -E '(^|[^0-9])(80:80|443:443)' deploy/vps/compose.yaml

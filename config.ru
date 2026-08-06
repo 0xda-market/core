@@ -110,7 +110,11 @@ pricing = ZeroXDA::Market::Pricing::Service.new(
 )
 
 # Currencies are catalog products; their prices are the exchange rates.
-localization = ZeroXDA::Market::Localization::Service.new(catalog: catalog)
+localization = ZeroXDA::Market::Localization::Service.new(
+  catalog: catalog,
+  clock: clock,
+  max_rate_age_seconds: Integer(ENV.fetch("FX_RATE_MAX_AGE_SECONDS", "3600"))
+)
 profitability = ZeroXDA::Market::Pricing::ProfitabilityPolicy.new(
   minimum_margin_bps: Integer(
     ENV.fetch(

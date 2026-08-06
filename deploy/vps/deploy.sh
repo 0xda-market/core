@@ -60,7 +60,7 @@ fi
 
 docker compose config --quiet
 docker compose pull mcp-control
-docker compose build --pull api
+docker compose build --pull api fx-refresh
 
 if [[ "$deploy_mode" == "stage" ]]; then
   echo "0xda-market $deploy_environment release staged"
@@ -75,7 +75,7 @@ fi
 if ! docker compose up --detach --remove-orphans; then
   echo "Docker Compose failed while starting the VPS stack" >&2
   docker compose ps >&2 || true
-  docker compose logs --tail 200 api mcp-control >&2 || true
+  docker compose logs --tail 200 api fx-refresh mcp-control >&2 || true
   exit 1
 fi
 

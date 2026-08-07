@@ -25,7 +25,7 @@ This distinction matters:
 - the cheapest broker remains the `best` routing candidate;
 - brokers slightly above the best ask can remain executable and compete for `competitive`/reserve traffic;
 - an expensive competitor cannot push the client price upward because competitor asks are not inputs to the headroom calculation;
-- lowering an ask improves ranking and can increase marketplace margin without reducing the broker's promised payout;
+- lowering an ask improves routing rank; the broker receives exactly that lower ask on future fulfilled allocations, while an unchanged buyer price may leave additional marketplace margin;
 - a transient cheaper listing does not automatically lower the current client price and unexpectedly de-execute other brokers.
 
 The broker contract remains exact: **broker ask = broker earning** for fulfilled allocated quantity. Routing headroom is a market pricing policy, not a deduction from broker proceeds.

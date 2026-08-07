@@ -5,9 +5,9 @@ module ZeroXDA
     module Transport
       class ManualAPI
         module PayoutConfirmation
-          def initialize(broker_earnings: nil, marketplace: nil, **options)
-            @broker_earnings = broker_earnings || marketplace&.instance_variable_get(:@broker_orders)&.instance_variable_get(:@earnings)
-            super(marketplace: marketplace, **options)
+          def initialize(broker_earnings: nil, **options)
+            @broker_earnings = broker_earnings
+            super(**options)
           end
 
           private

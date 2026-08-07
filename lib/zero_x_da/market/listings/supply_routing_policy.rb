@@ -47,7 +47,7 @@ module ZeroXDA
             Position.new(
               candidate: candidate,
               rank: rank,
-              status: status_for(rank, scores.fetch(rank)),
+              status: status_for(scores.fetch(rank)),
               estimated_share: BigDecimal(allocations.fetch(rank).to_s) / BASIS_POINTS
             ).freeze
           end.freeze
@@ -76,7 +76,9 @@ module ZeroXDA
             [candidate_cost(candidate), listing.created_at, listing.id]
           end
           return [ranked.freeze, [].freeze, [].freeze] if ranked.empty?
-          return [ranked.freeze, [BASIS_POINTS].freeze, [1].freeze] if ranked.length == 1
+          if ranked.length == 1
+            return [ranked.freeze, [BASIS_POINTS].freeze, [maximum_score].freeze]
+          end
 
           best_cost = candidate_cost(ranked.first)
           scores = ranked.map do |candidate|
@@ -100,6 +102,10 @@ module ZeroXDA
 
           remaining = @competitive_spread_bps - gap_bps
           remaining * remaining
+        end
+
+        def maximum_score
+          @competitive_spread_bps * @competitive_spread_bps
         end
 
         def relative_gap_bps(cost, best_cost)
@@ -127,8 +133,8 @@ module ZeroXDA
           base
         end
 
-        def status_for(rank, score)
-          return "best" if rank.zero?
+        def status_for(score)
+          return "best" if score == maximum_score
           return "competitive" if score.positive?
 
           "unlikely"

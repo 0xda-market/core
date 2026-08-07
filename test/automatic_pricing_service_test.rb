@@ -3,6 +3,7 @@
 require "minitest/autorun"
 require "bigdecimal"
 require_relative "../lib/zero_x_da/market/pricing/automatic_service"
+require_relative "../lib/zero_x_da/market/pricing/automatic_price_increase_policy"
 require_relative "../lib/zero_x_da/market/pricing/competitive_reference_policy"
 require_relative "../lib/zero_x_da/market/pricing/profitability_policy"
 
@@ -10,7 +11,7 @@ class AutomaticPricingServiceTest < Minitest::Test
   Product = Struct.new(:sku, :status, :marketable, keyword_init: true) do
     def marketable? = marketable
   end
-  Listing = Struct.new(:seller_user_id, :price_amount, :currency, :available_quantity, keyword_init: true)
+  Listing = Struct.new(:sku, :seller_user_id, :price_amount, :currency, :available_quantity, keyword_init: true)
   Price = Struct.new(:amount_usdt, keyword_init: true)
 
   class Catalog
@@ -19,21 +20,34 @@ class AutomaticPricingServiceTest < Minitest::Test
   end
 
   class Listings
-    def initialize(rows) = @rows = rows
-    def available_listings(sku:) = @rows.fetch(sku, [])
+    attr_reader :reads
+
+    def initialize(rows)
+      @rows = rows
+      @reads = 0
+    end
+
+    def available_listings
+      @reads += 1
+      @rows.values.flatten
+    end
   end
 
   class Localization
+    def supported_currency?(currency) = %w[USDT UAH].include?(currency)
+
     def amount_usdt(amount:, currency:)
-      raise ArgumentError, "stale FX" unless currency == "UAH"
+      raise ArgumentError, "unexpected currency" unless currency == "UAH"
 
       BigDecimal(amount.to_s) / 40
     end
   end
 
   class BrokenLocalization < Localization
+    def supported_currency?(_currency) = true
+
     def amount_usdt(amount:, currency:)
-      raise "unexpected adapter bug" if currency == "BUG"
+      raise ArgumentError, "unexpected adapter bug" if currency == "BUG"
 
       super
     end
@@ -66,8 +80,15 @@ class AutomaticPricingServiceTest < Minitest::Test
     Product.new(sku: sku, status: "active", marketable: true)
   end
 
-  def listing(price_amount:, currency: "USDT", seller_user_id: "broker-a", available_quantity: "1")
+  def listing(
+    price_amount:,
+    sku: "premium_3m",
+    currency: "USDT",
+    seller_user_id: "broker-a",
+    available_quantity: "1"
+  )
     Listing.new(
+      sku: sku,
       seller_user_id: seller_user_id,
       price_amount: price_amount,
       currency: currency,
@@ -79,6 +100,13 @@ class AutomaticPricingServiceTest < Minitest::Test
     ZeroXDA::Market::Pricing::CompetitiveReferencePolicy.new(routing_headroom_bps: 500)
   end
 
+  def increase_policy
+    ZeroXDA::Market::Pricing::AutomaticPriceIncreasePolicy.new(
+      max_uncorroborated_increase_bps: 1_500,
+      corroboration_spread_bps: 1_000
+    )
+  end
+
   def profitability
     ZeroXDA::Market::Pricing::ProfitabilityPolicy.new(
       minimum_margin_bps: 100,
@@ -88,15 +116,17 @@ class AutomaticPricingServiceTest < Minitest::Test
 
   def service(products:, rows:, current: {}, pricing: nil, localization: Localization.new)
     pricing ||= Pricing.new(current)
+    listings_store = Listings.new(rows)
     subject = ZeroXDA::Market::Pricing::AutomaticService.new(
       catalog: Catalog.new(products),
       pricing: pricing,
-      listings_store: Listings.new(rows),
+      listings_store: listings_store,
       localization: localization,
       profitability: profitability,
-      reference_policy: reference_policy
+      reference_policy: reference_policy,
+      increase_policy: increase_policy
     )
-    [subject, pricing]
+    [subject, pricing, listings_store]
   end
 
   def required_price_for(best_ask)
@@ -105,7 +135,7 @@ class AutomaticPricingServiceTest < Minitest::Test
   end
 
   def test_prices_a_new_product_from_best_supply_with_broker_routing_headroom
-    subject, pricing = service(
+    subject, pricing, = service(
       products: [product],
       rows: {
         "premium_3m" => [
@@ -134,7 +164,7 @@ class AutomaticPricingServiceTest < Minitest::Test
   def test_raises_an_insolvent_price_but_never_auto_reduces_a_profitable_price
     required = required_price_for("10")
 
-    low_subject, low_pricing = service(
+    low_subject, low_pricing, = service(
       products: [product],
       rows: { "premium_3m" => [listing(price_amount: "10")] },
       current: { "premium_3m" => Price.new(amount_usdt: required - BigDecimal("0.01")) }
@@ -142,7 +172,7 @@ class AutomaticPricingServiceTest < Minitest::Test
     assert_equal "raised", low_subject.reconcile.first.status
     refute_empty low_pricing.applied
 
-    high_subject, high_pricing = service(
+    high_subject, high_pricing, = service(
       products: [product],
       rows: { "premium_3m" => [listing(price_amount: "8")] },
       current: { "premium_3m" => Price.new(amount_usdt: BigDecimal("20")) }
@@ -153,8 +183,57 @@ class AutomaticPricingServiceTest < Minitest::Test
     assert_empty high_pricing.applied
   end
 
+  def test_guards_an_anomalous_single_broker_price_increase
+    subject, pricing, = service(
+      products: [product],
+      rows: { "premium_3m" => [listing(price_amount: "100")] },
+      current: { "premium_3m" => Price.new(amount_usdt: BigDecimal("10")) }
+    )
+
+    result = subject.reconcile.first
+
+    assert_equal "guarded", result.status
+    assert_equal "uncorroborated_increase", result.guard_reason
+    assert_equal BigDecimal("10"), result.price_usdt
+    assert_operator result.required_price_usdt, :>, BigDecimal("100")
+    assert_empty pricing.applied
+  end
+
+  def test_allows_an_anomalous_increase_when_independent_supply_corroborates
+    subject, pricing, = service(
+      products: [product],
+      rows: {
+        "premium_3m" => [
+          listing(price_amount: "100", seller_user_id: "broker-a"),
+          listing(price_amount: "105", seller_user_id: "broker-b")
+        ]
+      },
+      current: { "premium_3m" => Price.new(amount_usdt: BigDecimal("10")) }
+    )
+
+    result = subject.reconcile.first
+
+    assert_equal "raised", result.status
+    assert_equal BigDecimal("100"), result.supply_cost_usdt
+    refute_empty pricing.applied
+  end
+
+  def test_reads_available_supply_once_per_refresh
+    subject, _, listings_store = service(
+      products: [product("premium_3m"), product("stars_100")],
+      rows: {
+        "premium_3m" => [listing(price_amount: "10")],
+        "stars_100" => [listing(price_amount: "5", sku: "stars_100", seller_user_id: "broker-b")]
+      }
+    )
+
+    subject.reconcile
+
+    assert_equal 1, listings_store.reads
+  end
+
   def test_sub_unit_supply_cannot_anchor_the_unit_pricing_floor
-    subject, pricing = service(
+    subject, pricing, = service(
       products: [product],
       rows: {
         "premium_3m" => [
@@ -170,7 +249,7 @@ class AutomaticPricingServiceTest < Minitest::Test
     refute_empty pricing.applied
   end
 
-  def test_stale_or_unsupported_fx_is_excluded_but_unexpected_adapter_errors_surface
+  def test_unavailable_fx_is_excluded_but_other_argument_errors_surface
     stale_subject, = service(
       products: [product],
       rows: {
@@ -187,7 +266,7 @@ class AutomaticPricingServiceTest < Minitest::Test
       rows: { "premium_3m" => [listing(price_amount: "10", currency: "BUG")] },
       localization: BrokenLocalization.new
     )
-    assert_raises(RuntimeError) { broken_subject.reconcile }
+    assert_raises(ArgumentError) { broken_subject.reconcile }
   end
 
   def test_price_application_uses_the_revision_captured_before_the_price_snapshot
@@ -205,7 +284,7 @@ class AutomaticPricingServiceTest < Minitest::Test
   end
 
   def test_product_without_supply_remains_unpriced
-    subject, pricing = service(products: [product], rows: {})
+    subject, pricing, = service(products: [product], rows: {})
 
     result = subject.reconcile.first
 

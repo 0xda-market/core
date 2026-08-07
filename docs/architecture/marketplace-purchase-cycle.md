@@ -2,12 +2,13 @@
 
 ## Scope
 
-This document defines the marketplace path from administrator product creation through broker liquidity, payment confirmation and provider-neutral fulfillment.
+This document defines the marketplace path from administrator product creation through broker liquidity, market-owned pricing, payment confirmation and provider-neutral fulfillment.
 
 ```text
 inactive product
-  -> reviewed active product + client price
-  -> active broker listing
+  -> reviewed active product
+  -> broker liquidity
+  -> current market-owned client price
   -> listing allocation + reservation
   -> client quote
   -> payment-pending order
@@ -18,13 +19,22 @@ inactive product
 
 The core models payment state and the confirmation boundary. Wallet balances, blockchain transfers, card acquiring, payout execution and automated settlement remain separate provider adapters.
 
-## Product creation
+## Product creation and pricing
 
 `POST /v1/admin/products` creates one locale-neutral product and one initial localization in a single store transaction.
 
-New products default to `inactive`. Creating a product does not make it purchasable. Activation and pricing remain explicit administrator operations.
+New products default to `inactive`. Creating a product does not make it purchasable. The stable SKU cannot be edited through the product update surface. Duplicate SKU creation returns `duplicate_product`.
 
-The stable SKU cannot be edited through the product update surface. Duplicate SKU creation returns `duplicate_product`.
+An active + marketable product participates in automatic pricing when unit-executable broker supply exists. The current client price is always the latest append-only `market.product_prices` row and may be sourced from:
+
+- an explicit administrator application (`admin`);
+- automatic market pricing (`core`).
+
+Automatic pricing uses the best valid normalized broker ask as an anchor, applies bounded market-owned routing headroom, then derives the minimum solvent client price through the same `ProfitabilityPolicy` used by execution. A more expensive competitor cannot directly raise that price.
+
+The automatic worker may create or raise a price but does not automatically lower a profitable price. Administrator overrides remain explicit and execution remains the final profitability gate.
+
+See [Automatic Pricing](automatic-pricing.md) and [Administrator pricing](admin-pricing.md).
 
 ## Broker inventory
 
@@ -41,15 +51,17 @@ quantity = available_quantity + reserved_quantity + sold_quantity
 
 A broker cannot reduce total quantity below `reserved_quantity + sold_quantity`. Existing quote economics are not changed by later listing edits.
 
+For automatic unit pricing, a listing must have at least one available unit before it can anchor the price. Fractional residual inventory that cannot satisfy the unit catalog contract cannot make the product appear cheaply executable.
+
 ## Allocation and reservation
 
 `POST /v1/market/quotes` accepts the internal customer UUID, product SKU and quantity.
 
 The service:
 
-1. verifies an active, marketable product and active client price;
+1. verifies an active, marketable product and current client price;
 2. releases expired reservations in the same store transaction;
-3. fixes the provider quote at the administrator's current sale price;
+3. fixes the provider quote at the current market-owned sale price;
 4. locks active listings able to execute the full requested quantity;
 5. normalizes broker asks to USDT and rejects asks that fail the profitability policy at that fixed sale price;
 6. ranks profitable supply by ask and uses the quote ID to select the `best`, `competitive` or reserve traffic tier;
@@ -59,7 +71,7 @@ The service:
 
 The MVP intentionally uses one listing per quote. The reservation contract can be extended later with multi-listing allocation without changing the buyer API.
 
-An expensive listing never changes the client price. If no current listing can execute profitably at the administrator price, quote creation returns `insufficient_liquidity` before inventory or an order is created. Once inventory is reserved, later listing or administrator price edits do not change the quote.
+A listing that cannot execute profitably never changes an already issued quote. If no current listing can execute at the fixed current client price, quote creation returns `insufficient_liquidity` before inventory or an order is created. Once inventory is reserved, later listing or market price edits do not change the quote.
 
 Routing shares and broker-facing feedback are defined in [Broker supply routing](broker-supply-routing.md).
 
@@ -85,10 +97,11 @@ Runtime parameters are provider-neutral:
 
 - `MARKETPLACE_MIN_MARGIN_BPS` — minimum net margin; default `100` (1%);
 - `MARKETPLACE_SUPPLY_BUFFER_BPS` — FX, spread and slippage reserve on supply cost; default `100` (1%);
+- `MARKETPLACE_ROUTING_HEADROOM_BPS` — automatic-pricing room above the best broker ask; default `500` (5%);
 - `MARKETPLACE_VARIABLE_FEE_BPS` — payment or settlement fees charged as a revenue percentage; default `0`;
 - `MARKETPLACE_FIXED_COST_USDT` — fixed cost allocated once per quote; default `0`.
 
-Catalog eligibility uses quantity `1`. Exact quote eligibility is quantity-aware, so a fixed order cost is amortized across the requested quantity. All four inputs are server-controlled and never accepted from browser or channel payloads.
+Automatic catalog pricing uses quantity `1` and first transforms the best broker ask through the routing-headroom policy. Exact quote eligibility remains quantity-aware, so a fixed order cost is amortized across the requested quantity. All inputs are server-controlled and never accepted from browser or channel payloads.
 
 ## Quote acceptance
 
@@ -144,6 +157,12 @@ A payment confirmation after the deadline returns `payment_expired`. The corresp
 
 Payment cancellation, refunds and post-payment disputes are not part of this stage. Those transitions require an explicit financial ledger and refund contract.
 
+## Price concurrency
+
+Administrator pricing and automatic pricing share the same revisioned append-only ledger. The automatic worker captures its revision before reading the current price snapshot and applies any batch against that captured revision.
+
+A concurrent admin/core/FX append therefore causes a stale automatic batch to fail with `concurrency_conflict` instead of overwriting newer price intent. The worker retries on a later pass.
+
 ## Privacy
 
 Buyer responses expose only client commercial terms, payment state and inventory state. They do not expose:
@@ -151,7 +170,8 @@ Buyer responses expose only client commercial terms, payment state and inventory
 - broker identity;
 - listing ID;
 - broker supply price;
-- broker supply currency.
+- broker supply currency;
+- routing rank or competitor information.
 
 The channel adapter must resolve the authenticated external identity to `market.users.id` and must not trust an actor ID supplied by browser code.
 

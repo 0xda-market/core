@@ -21,11 +21,12 @@ module ZeroXDA
         CAPABILITY = "manual.fulfillment"
         CLIENT_PRICE_SCALE = 6
 
-        def initialize(kernel:, catalog:, pricing:, listings:)
+        def initialize(kernel:, catalog:, pricing:, listings:, settlement_provider: nil)
           @kernel = kernel
           @catalog = catalog
           @pricing = pricing
           @listings = listings
+          @settlement_provider = settlement_provider
         end
 
         def quote(customer_user_id:, sku:, quantity: 1, context: {})
@@ -84,6 +85,11 @@ module ZeroXDA
             )
           end
 
+          # Settlement cost is part of quote economics and must fail before any
+          # broker inventory is reserved. The v1 manual adapter has static costs;
+          # the composition root feeds the same CostResult into ProfitabilityPolicy.
+          @kernel.settlement_cost(quote) if @kernel.respond_to?(:settlement_cost)
+
           reservation = @listings.reserve(
             customer_user_id: customer_id,
             quote_id: quote.id,
@@ -125,19 +131,21 @@ module ZeroXDA
             quote_id: quote_id,
             order_id: order.id
           )
+          @kernel.charge_settlement(order.id) if @kernel.respond_to?(:charge_settlement)
           OrderResult.new(order: order, reservation: reservation)
         rescue StandardError
           begin
             if order && %w[accepted payment_pending].include?(order.status)
               @kernel.cancel_order(order.id)
             end
+            @listings.release(customer_user_id: customer_id, quote_id: quote_id) if reservation
           rescue StandardError
             nil
           end
           raise
         end
 
-        def confirm_payment(order_id:, reference:, data: {})
+        def confirm_payment(order_id:, reference:, data: {}, settlement: nil)
           before = @kernel.find_order(order_id)
           unless before.payment
             raise Core::Conflict.new(
@@ -145,6 +153,13 @@ module ZeroXDA
               code: "payment_not_required",
               details: { order_id: order_id.to_s }
             )
+          end
+
+          if settlement
+            @kernel.verify_settlement(settlement)
+          elsif @settlement_provider
+            current = @settlement_provider.find_by_order(order_id)
+            @kernel.verify_settlement(current) if current
           end
 
           confirmed = @kernel.confirm_order_payment(

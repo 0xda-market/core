@@ -85,7 +85,7 @@ Broker listing responses may include private routing feedback:
 - `sale_price_usdt` — the current market-owned client price;
 - `maximum_ask` — the highest ask in the broker's own currency that satisfies the configured profitability policy for one unit.
 
-`best` is the lowest normalized executable ask. Another executable broker is `competitive` while its relative gap remains inside the configured competitive spread; at or beyond that spread it is `unlikely` and receives reserve-only traffic.
+`best` applies to every executable broker tied at the lowest normalized ask. An executable broker above the best ask is `competitive` while its relative gap remains inside the configured competitive spread; at or beyond that spread it is `unlikely` and receives reserve-only traffic.
 
 `maximum_ask` is derived from the current client price, so an automatically priced product naturally exposes the current executable ceiling created by routing headroom plus profitability constraints.
 

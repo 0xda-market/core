@@ -46,15 +46,15 @@ module ZeroXDA
           scope.all.map { |row| deserialize_earning(row) }
         end
 
+        # Preserved from the earnings-ledger contract merged in #96.
         def insert(earning)
           @earnings.insert(earning.to_h)
           earning
         rescue Sequel::UniqueConstraintViolation
-          raise Core::Conflict.new(
-            "broker earning violates a uniqueness constraint",
-            code: "duplicate_broker_earning",
-            details: { order_id: earning.order_id }
-          )
+          existing = find_by_order(earning.order_id)
+          return existing if existing&.seller_user_id == earning.seller_user_id
+          raise Core::Conflict.new("broker earning already exists", code: "duplicate_broker_earning",
+                                   details: { order_id: earning.order_id })
         end
 
         def replace(earning, expected_version:)
@@ -98,10 +98,10 @@ module ZeroXDA
           @payouts.insert(payout.to_h)
           payout
         rescue Sequel::UniqueConstraintViolation
-          # Do not issue follow-up SELECTs here: PostgreSQL keeps the surrounding
-          # transaction in the failed state until rollback. Normal service paths
-          # classify in-flight retries before insertion under the locked profile;
-          # this is the database backstop for races or direct adapter writes.
+          # Unlike the pre-existing earning adapter, payout creation has no
+          # legacy retry contract to preserve. Avoid follow-up SELECTs after a
+          # failed PostgreSQL statement; the service classifies normal retries
+          # before insertion while holding the seller profile lock.
           raise Core::Conflict.new("payout violates a uniqueness constraint", code: "payout_conflict")
         end
 

@@ -53,6 +53,7 @@ module ZeroXDA
           def present_broker_order(entry)
             decision = entry.decision
             product = entry.order.payload.fetch("product", {})
+            earning = entry.respond_to?(:earning) && entry.earning
             resource = {
               "type" => "broker_order", "id" => decision.order_id,
               "attributes" => {
@@ -62,11 +63,16 @@ module ZeroXDA
                 "quantity" => decimal_string(entry.reservation.quantity),
                 "client_total_price_usdt" => product["total_price_usdt"],
                 "currency" => product["currency"] || "USDT",
+                "broker_ask_amount" => decimal_string(entry.reservation.supply_unit_price),
+                "broker_ask_currency" => entry.reservation.supply_currency,
+                "broker_earning_amount" => earning && decimal_string(earning.payable_amount),
+                "broker_earning_currency" => earning&.payable_currency,
+                "broker_earning_status" => earning&.state,
                 "accepted_at" => timestamp(decision.accepted_at),
                 "completed_at" => timestamp(decision.completed_at),
                 "created_at" => timestamp(decision.created_at),
                 "updated_at" => timestamp(decision.updated_at), "version" => decision.version
-              }
+              }.compact
             }
             event = decision.pending_notification_event
             resource["meta"] = {
@@ -84,17 +90,13 @@ module ZeroXDA
             method = request.request_method
             path = request.path_info
             return route(:broker_orders) if method == "GET" && path == "/v1/broker/orders" && available?(:broker_orders)
-
             accept_match = path.match(%r{\A/v1/broker/orders/([^/]+)/accept\z})
             return route(:accept_broker_order, id: accept_match[1]) if method == "POST" && accept_match && available?(:broker_orders)
-
             complete_match = path.match(%r{\A/v1/broker/orders/([^/]+)/complete\z})
             return route(:complete_broker_order, id: complete_match[1]) if method == "POST" && complete_match && available?(:broker_orders)
-
             notification_match = path.match(%r{\A/v1/broker/orders/([^/]+)/notifications/([^/]+)/ack\z})
             if method == "POST" && notification_match && available?(:broker_orders)
-              return route(:acknowledge_broker_order_notification,
-                           id: notification_match[1], event: notification_match[2])
+              return route(:acknowledge_broker_order_notification, id: notification_match[1], event: notification_match[2])
             end
             super
           end

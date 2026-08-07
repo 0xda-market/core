@@ -23,27 +23,30 @@ actor_user_id = ENV.fetch("MARKET_BOOTSTRAP_ACTOR_USER_ID")
 manifest_path = ARGV.fetch(0) { ENV.fetch("MARKET_BOOTSTRAP_MANIFEST") }
 manifest = JSON.parse(File.read(manifest_path))
 
-database = ZeroXDA::Market::Adapters::PostgresDatabase.new(url: database_url, max_connections: 1)
-catalog = ZeroXDA::Market::Catalog::Service.new(
-  store: ZeroXDA::Market::Catalog::PostgresStore.new(database: database)
-)
-pricing = ZeroXDA::Market::Pricing::Service.new(
-  store: ZeroXDA::Market::Pricing::PostgresStore.new(database: database),
-  catalog: catalog
-)
-identity_store = ZeroXDA::Market::Identity::PostgresStore.new(database: database)
-listings = ZeroXDA::Market::Listings::Service.new(
-  store: ZeroXDA::Market::Listings::PostgresStore.new(database: database),
-  users: identity_store,
-  catalog: catalog
-)
+database = nil
+begin
+  database = ZeroXDA::Market::Adapters::PostgresDatabase.new(url: database_url, max_connections: 1)
+  catalog = ZeroXDA::Market::Catalog::Service.new(
+    store: ZeroXDA::Market::Catalog::PostgresStore.new(database: database)
+  )
+  pricing = ZeroXDA::Market::Pricing::Service.new(
+    store: ZeroXDA::Market::Pricing::PostgresStore.new(database: database),
+    catalog: catalog
+  )
+  identity_store = ZeroXDA::Market::Identity::PostgresStore.new(database: database)
+  listings = ZeroXDA::Market::Listings::Service.new(
+    store: ZeroXDA::Market::Listings::PostgresStore.new(database: database),
+    users: identity_store,
+    catalog: catalog
+  )
 
-result = ZeroXDA::Market::Bootstrap::Reconciler.new(
-  pricing: pricing,
-  listings: listings,
-  actor_user_id: actor_user_id
-).reconcile(manifest)
+  result = ZeroXDA::Market::Bootstrap::Reconciler.new(
+    pricing: pricing,
+    listings: listings,
+    actor_user_id: actor_user_id
+  ).reconcile(manifest)
 
-puts JSON.pretty_generate(result)
+  puts JSON.pretty_generate(result)
 ensure
   database&.disconnect
+end

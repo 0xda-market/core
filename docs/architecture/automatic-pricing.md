@@ -121,7 +121,7 @@ The declarative `bin/market-bootstrap` introduced by PR #99 remains an operation
 - routing headroom is bounded, server-controlled and never influenced by a more expensive competitor ask;
 - unit automatic pricing ignores inventory that cannot fulfill one complete unit;
 - automatic pricing and execution use the same `ProfitabilityPolicy`;
-- settlement costs come through the settlement cost contract;
+- settlement costs use the same manual-v1 `CostResult` configuration as execution;
 - stale/unsupported FX fails closed for the affected non-USDT supply input;
 - unexpected runtime failures fail the refresh pass instead of silently deleting liquidity;
 - automatic repricing may raise an insolvent price but never lowers a profitable price;

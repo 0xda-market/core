@@ -12,13 +12,9 @@ A broker listing is executable only when its normalized USDT supply cost satisfi
 
 Eligible broker supply is ranked privately by normalized executable cost. Exact competitor asks are never exposed.
 
-Routing currently uses deterministic traffic tiers:
+Routing is price-sensitive rather than tier-fixed. With one executable broker, that broker receives 100% of allocations. With multiple executable brokers, the default policy splits 10% of traffic evenly as a reserve pool and distributes the remaining 90% through a quadratic price score inside a 10% competitive spread from the best normalized ask. An offer at or beyond that spread remains reserve-only while it is still profitable.
 
-- one eligible broker: 100%;
-- two eligible brokers: 80% / 20%;
-- three or more eligible brokers: 70% / 20% / 10% for the top three executable offers.
-
-Lowering a broker ask can therefore improve routing rank and expected order share without changing the price shown to the client.
+Lowering an executable broker ask therefore improves expected order share continuously without changing the price shown to the client. Equal asks receive equal economic weight. Quote-ID hashing keeps allocation replay-stable, and each broker contributes at most one candidate per SKU.
 
 ## FX and localized client pricing
 

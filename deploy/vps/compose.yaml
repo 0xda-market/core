@@ -108,7 +108,7 @@ services:
       - /etc/mcp-control/agent.json
     volumes:
       - ./mcp-control/bin/mcp-control:/opt/mcp-control/mcp-control:ro
-      - ./mcp-control/config:/etc/mcp-control/agent.json:ro
+      - ./mcp-control/config:/etc/mcp-control:ro
     tmpfs:
       - /run/mcp-control:rw,noexec,nosuid,nodev,size=1m,mode=0750,uid=65532,gid=65532
       - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777,uid=65532,gid=65532

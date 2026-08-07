@@ -36,6 +36,7 @@ require_relative "lib/zero_x_da/market/broker_earnings/service"
 require_relative "lib/zero_x_da/market/broker_orders/memory_store"
 require_relative "lib/zero_x_da/market/broker_orders/postgres_store"
 require_relative "lib/zero_x_da/market/broker_orders/service"
+require_relative "lib/zero_x_da/market/marketplace/recipient_resolver"
 require_relative "lib/zero_x_da/market/marketplace/service"
 require_relative "lib/zero_x_da/market/marketplace/broker_order_decisions"
 require_relative "lib/zero_x_da/market/settlement/memory_store"
@@ -113,8 +114,10 @@ broker_order_store = database ? ZeroXDA::Market::BrokerOrders::PostgresStore.new
 broker_orders = manual_provider && ZeroXDA::Market::BrokerOrders::Service.new(store: broker_order_store, kernel: kernel,
                                                                                listings: listings, provider: manual_provider,
                                                                                earnings: broker_earnings, clock: clock)
+recipient_resolver = ZeroXDA::Market::Marketplace::RecipientResolver.new(identities: identity_store)
 marketplace = ZeroXDA::Market::Marketplace::Service.new(kernel: kernel, catalog: catalog, pricing: pricing, listings: listings,
-                                                        broker_orders: broker_orders, settlement_provider: settlement_provider)
+                                                        broker_orders: broker_orders, settlement_provider: settlement_provider,
+                                                        recipient_resolver: recipient_resolver)
 public_api = ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, token: public_token, readiness: -> { store.healthy? },
                                                      identity_service: identity_service, admin_service: admin_service,
                                                      catalog: catalog, pricing: pricing, localization: localization,

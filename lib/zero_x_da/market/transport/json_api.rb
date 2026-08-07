@@ -24,6 +24,7 @@ module ZeroXDA
           admin_service: nil, catalog: nil, pricing: nil, localization: nil,
           listings: nil, marketplace: nil, broker_orders: nil, broker_earnings: nil
         )
+          broker_earnings ||= broker_orders&.instance_variable_get(:@earnings)
           error_mapper = ErrorMapper.new
           request_parser = RequestParser.new(localization: localization)
           endpoint_handler = EndpointHandler.new(

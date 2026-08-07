@@ -10,6 +10,13 @@ module ZeroXDA
     module Catalog
       class PostgresStore
         DEFAULT_LOCALE = "en_US"
+        LANGUAGE_FALLBACKS = {
+          "en" => "en_US",
+          "uk" => "uk_UA",
+          "ru" => "ru_RU",
+          "es" => "es_ES",
+          "pt" => "pt_BR"
+        }.freeze
 
         def initialize(database:)
           @database = database.connection
@@ -123,16 +130,16 @@ module ZeroXDA
         private
 
         def translations_for(skus, locale)
-          rows = @localizations.where(
-            product_sku: skus,
-            locale: [locale, DEFAULT_LOCALE]
-          ).all
+          language_fallback = language_fallback_for(locale)
+          locales = [locale, language_fallback, DEFAULT_LOCALE].compact.uniq
+          rows = @localizations.where(product_sku: skus, locale: locales).all
           grouped = rows.group_by { |row| row.fetch(:product_sku) }
           skus.to_h do |sku|
             candidates = grouped.fetch(sku, [])
             requested = candidates.find { |row| row.fetch(:locale) == locale }
+            language = candidates.find { |row| row.fetch(:locale) == language_fallback }
             fallback = candidates.find { |row| row.fetch(:locale) == DEFAULT_LOCALE }
-            [sku, requested || fallback || {}]
+            [sku, requested || language || fallback || {}]
           end
         end
 
@@ -205,10 +212,18 @@ module ZeroXDA
         def normalize_locale(value)
           normalized = value.to_s.strip.tr("-", "_")
           return DEFAULT_LOCALE if normalized.empty?
-          return "uk_UA" if normalized.downcase.start_with?("uk")
-          return "en_US" if normalized.downcase.start_with?("en")
 
-          Product::LOCALE_PATTERN.match?(normalized) ? normalized : DEFAULT_LOCALE
+          if normalized.match?(/\A[a-zA-Z]{2}\z/)
+            return LANGUAGE_FALLBACKS.fetch(normalized.downcase, DEFAULT_LOCALE)
+          end
+
+          parts = normalized.split("_", 2)
+          candidate = parts.length == 2 ? "#{parts[0].downcase}_#{parts[1].upcase}" : normalized
+          Product::LOCALE_PATTERN.match?(candidate) ? candidate : DEFAULT_LOCALE
+        end
+
+        def language_fallback_for(locale)
+          LANGUAGE_FALLBACKS[locale.to_s[0, 2].downcase]
         end
 
         def document(value)

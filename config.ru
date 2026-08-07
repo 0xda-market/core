@@ -35,6 +35,10 @@ require_relative "lib/zero_x_da/market/broker_orders/postgres_store"
 require_relative "lib/zero_x_da/market/broker_orders/service"
 require_relative "lib/zero_x_da/market/marketplace/service"
 require_relative "lib/zero_x_da/market/marketplace/broker_order_decisions"
+require_relative "lib/zero_x_da/market/settlement/memory_store"
+require_relative "lib/zero_x_da/market/settlement/postgres_store"
+require_relative "lib/zero_x_da/market/settlement/manual_provider"
+require_relative "lib/zero_x_da/market/settlement/integration"
 
 clock = -> { Time.now.utc }
 environment = ENV.fetch("DEPLOY_ENV", "development")
@@ -115,6 +119,45 @@ localization = ZeroXDA::Market::Localization::Service.new(
   clock: clock,
   max_rate_age_seconds: Integer(ENV.fetch("FX_RATE_MAX_AGE_SECONDS", "3600"))
 )
+
+manual_provider = if operator_token && !operator_token.empty?
+                    ZeroXDA::Market::Providers::ManualProvider.new(
+                      key: "manual.default",
+                      clock: clock,
+                      quote_ttl: manual_quote_ttl,
+                      **(task_store ? { task_store: task_store } : {})
+                    )
+                  end
+providers = manual_provider ? { "manual.fulfillment" => manual_provider } : {}
+
+settlement_store = if database
+                     ZeroXDA::Market::Settlement::PostgresStore.new(database: database)
+                   else
+                     ZeroXDA::Market::Settlement::MemoryStore.new
+                   end
+settlement_provider = if operator_token && !operator_token.empty?
+                        ZeroXDA::Market::Settlement::ManualProvider.new(
+                          clock: clock,
+                          store: settlement_store,
+                          variable_fee_bps: Integer(
+                            ENV.fetch(
+                              "MARKETPLACE_VARIABLE_FEE_BPS",
+                              ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_VARIABLE_FEE_BPS.to_s
+                            )
+                          ),
+                          fixed_cost_usdt: ENV.fetch(
+                            "MARKETPLACE_FIXED_COST_USDT",
+                            ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_FIXED_COST_USDT.to_s("F")
+                          ),
+                          tolerance_bps: Integer(ENV.fetch("MANUAL_SETTLEMENT_TOLERANCE_BPS", "0"))
+                        )
+                      end
+settlement_cost = settlement_provider&.default_cost ||
+                  ZeroXDA::Market::Core::Contracts::CostResult.new(
+                    variable_fee_bps: 0,
+                    fixed_cost_usdt: 0
+                  )
+
 profitability = ZeroXDA::Market::Pricing::ProfitabilityPolicy.new(
   minimum_margin_bps: Integer(
     ENV.fetch(
@@ -128,30 +171,13 @@ profitability = ZeroXDA::Market::Pricing::ProfitabilityPolicy.new(
       ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_SUPPLY_BUFFER_BPS.to_s
     )
   ),
-  variable_fee_bps: Integer(
-    ENV.fetch(
-      "MARKETPLACE_VARIABLE_FEE_BPS",
-      ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_VARIABLE_FEE_BPS.to_s
-    )
-  ),
-  fixed_cost_usdt: ENV.fetch(
-    "MARKETPLACE_FIXED_COST_USDT",
-    ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_FIXED_COST_USDT.to_s("F")
-  )
+  variable_fee_bps: settlement_cost.variable_fee_bps,
+  fixed_cost_usdt: settlement_cost.fixed_cost_usdt
 )
-
-manual_provider = if operator_token && !operator_token.empty?
-                    ZeroXDA::Market::Providers::ManualProvider.new(
-                      key: "manual.default",
-                      clock: clock,
-                      quote_ttl: manual_quote_ttl,
-                      **(task_store ? { task_store: task_store } : {})
-                    )
-                  end
-providers = manual_provider ? { "manual.fulfillment" => manual_provider } : {}
 
 kernel = ZeroXDA::Market::Core::Kernel.new(
   providers: providers,
+  settlement: settlement_provider,
   store: store,
   clock: clock,
   id_generator: SecureRandom.method(:uuid)
@@ -195,7 +221,8 @@ marketplace = ZeroXDA::Market::Marketplace::Service.new(
   catalog: catalog,
   pricing: pricing,
   listings: listings,
-  broker_orders: broker_orders
+  broker_orders: broker_orders,
+  settlement_provider: settlement_provider
 )
 public_api = ZeroXDA::Market::Transport::JSONAPI.new(
   kernel: kernel,
@@ -220,7 +247,8 @@ if manual_provider
     token: operator_token,
     identity_service: identity_service,
     catalog: catalog,
-    marketplace: marketplace
+    marketplace: marketplace,
+    settlement_provider: settlement_provider
   )
   applications["/operator"] = operator_api
 end

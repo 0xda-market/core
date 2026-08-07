@@ -58,6 +58,40 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  price-refresh:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    command:
+      - bundle
+      - exec
+      - ruby
+      - bin/refresh_market_prices_loop
+    depends_on:
+      api:
+        condition: service_healthy
+      fx-refresh:
+        condition: service_started
+    networks:
+      - edge
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   mcp-control:
     image: alpine:3.22
     restart: unless-stopped
@@ -74,7 +108,7 @@ services:
       - /etc/mcp-control/agent.json
     volumes:
       - ./mcp-control/bin/mcp-control:/opt/mcp-control/mcp-control:ro
-      - ./mcp-control/config:/etc/mcp-control:ro
+      - ./mcp-control/config:/etc/mcp-control/agent.json:ro
     tmpfs:
       - /run/mcp-control:rw,noexec,nosuid,nodev,size=1m,mode=0750,uid=65532,gid=65532
       - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777,uid=65532,gid=65532

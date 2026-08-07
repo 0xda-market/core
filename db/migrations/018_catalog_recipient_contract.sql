@@ -23,12 +23,7 @@ ON CONFLICT (sku) DO UPDATE SET
   version = market.products.version + 1;
 
 UPDATE market.products
-SET metadata = jsonb_set(
-      jsonb_set(metadata, '{purchase,quantity_mode}', '"single"'::jsonb, true),
-      '{purchase,recipient}',
-      '{"provider":"telegram","modes":["self","username"],"eligibility":{"is_premium":false},"ineligible_code":"premium_already_active"}'::jsonb,
-      true
-    ),
+SET metadata = metadata || '{"purchase":{"quantity_mode":"single","recipient":{"provider":"telegram","modes":["self","username"],"eligibility":{"is_premium":false},"ineligible_code":"premium_already_active"}}}'::jsonb,
     position = CASE sku WHEN 'premium_3m' THEN 1 WHEN 'premium_6m' THEN 2 ELSE position END,
     status = 'active',
     marketable = true,
@@ -37,12 +32,7 @@ SET metadata = jsonb_set(
 WHERE sku IN ('premium_3m', 'premium_6m');
 
 UPDATE market.products
-SET metadata = jsonb_set(
-      jsonb_set(metadata, '{purchase,quantity_mode}', '"single"'::jsonb, true),
-      '{purchase,recipient}',
-      '{"provider":"telegram","modes":["self","username"]}'::jsonb,
-      true
-    ),
+SET metadata = metadata || '{"purchase":{"quantity_mode":"single","recipient":{"provider":"telegram","modes":["self","username"]}}}'::jsonb,
     position = CASE sku
       WHEN 'stars_500' THEN 4
       WHEN 'stars_1000' THEN 5

@@ -10,7 +10,8 @@ module ZeroXDA
           def initialize(marketplace: nil, settlement_provider: nil, **options)
             @marketplace = marketplace
             @settlement_provider = settlement_provider
-            super(**options)
+            broker_earnings = marketplace&.instance_variable_get(:@broker_orders)&.instance_variable_get(:@earnings)
+            super(broker_earnings: broker_earnings, **options)
           end
 
           private

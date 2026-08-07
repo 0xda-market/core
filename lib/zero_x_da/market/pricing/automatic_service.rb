@@ -133,8 +133,10 @@ module ZeroXDA
         private
 
         def pricing_listings_by_sku(products)
-          skus = products.map(&:sku)
-          @listings_store.available_listings(skus: skus).group_by(&:sku)
+          available = @listings_store.available_listings.group_by(&:sku)
+          products.each_with_object({}) do |product, selected|
+            selected[product.sku] = available.fetch(product.sku, [])
+          end
         end
 
         def normalized_supply(listings)

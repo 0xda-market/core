@@ -63,18 +63,9 @@ module ZeroXDA
         def start_execution(id)
           if @settlement_provider
             order = find_order(id)
-            if order.payment
+            if order.payment && order.payment["settlement_required"]
               settlement = @settlement_provider.respond_to?(:find_by_order) && @settlement_provider.find_by_order(order.id)
-              if settlement
-                verified = @settlement_provider.verify(settlement: settlement)
-                unless verified.is_a?(Core::Contracts::SettlementResult)
-                  raise Core::Conflict.new(
-                    "settlement is required before fulfillment",
-                    code: "payment_required",
-                    details: { order_id: order.id }
-                  )
-                end
-              end
+              verify_settlement(settlement)
             end
           end
           super

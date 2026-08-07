@@ -45,6 +45,7 @@ module ZeroXDA
 
         def verify_settlement(settlement)
           return nil unless @settlement_provider
+          raise Core::Conflict.new("settlement is missing", code: "payment_required") unless settlement
 
           result = @settlement_provider.verify(settlement: settlement)
           unless result.is_a?(Core::Contracts::SettlementResult)
@@ -79,45 +80,8 @@ module ZeroXDA
           super
         end
       end
-
-      module MarketplaceIntegration
-        def quote(**arguments)
-          result = super
-          @kernel.settlement_cost(result.quote)
-          result
-        end
-
-        def accept(customer_user_id:, quote_id:)
-          result = super
-          @kernel.charge_settlement(result.order.id)
-          result
-        rescue StandardError
-          begin
-            release_quote(customer_user_id: customer_user_id, quote_id: quote_id) if result
-          rescue StandardError
-            nil
-          end
-          raise
-        end
-
-        def confirm_payment(order_id:, reference:, data: {}, settlement: nil)
-          if settlement
-            @kernel.verify_settlement(settlement)
-          elsif @settlement_provider
-            current = @settlement_provider.find_by_order(order_id)
-            @kernel.verify_settlement(current) if current
-          end
-          super(order_id: order_id, reference: reference, data: data)
-        end
-
-        def initialize(settlement_provider: nil, **options)
-          @settlement_provider = settlement_provider
-          super(**options)
-        end
-      end
     end
   end
 end
 
 ZeroXDA::Market::Core::Kernel.prepend(ZeroXDA::Market::Settlement::KernelIntegration)
-ZeroXDA::Market::Marketplace::Service.prepend(ZeroXDA::Market::Settlement::MarketplaceIntegration)

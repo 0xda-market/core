@@ -25,7 +25,7 @@ This distinction matters:
 - the cheapest broker remains the strongest routing candidate;
 - brokers slightly above the best ask can remain executable and compete for traffic;
 - an expensive competitor cannot push the client price upward because competitor asks are not inputs to the headroom calculation;
-- lowering an ask improves expected order share continuously rather than only when a broker crosses a rank boundary;
+- lowering an ask inside the competitive spread improves expected order share without requiring a rank crossover; crossing into the competitive spread restores access to price-performance traffic;
 - the broker receives exactly the submitted ask on future fulfilled allocations, while an unchanged buyer price may leave additional marketplace margin;
 - a transient cheaper listing does not automatically lower the current client price and unexpectedly de-execute other brokers.
 
@@ -99,6 +99,7 @@ Broker listing responses may include private routing feedback:
 - one broker contributes at most one candidate per SKU;
 - equal asks receive equal economic weight;
 - lowering an executable ask cannot reduce that broker's allocation share while the competing snapshot is unchanged;
+- inside the competitive spread, each basis-point improvement can increase the broker's price-performance allocation;
 - 10% total reserve traffic remains available to executable alternatives by default;
 - allocation always sums to exactly 10,000 basis points;
 - retries are stable for the same quote and candidate snapshot;

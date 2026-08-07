@@ -100,7 +100,7 @@ Broker listing responses may include private routing feedback:
 - equal asks receive equal economic weight;
 - lowering an executable ask cannot reduce that broker's allocation share while the competing snapshot is unchanged;
 - inside the competitive spread, each basis-point improvement can increase the broker's price-performance allocation;
-- 10% total reserve traffic remains available to executable alternatives by default;
+- the default 10% reserve pool is split evenly across all executable brokers, creating a bounded nonzero exploration floor for alternatives;
 - allocation always sums to exactly 10,000 basis points;
 - retries are stable for the same quote and candidate snapshot;
 - competitor identity and exact competitor asks remain private.

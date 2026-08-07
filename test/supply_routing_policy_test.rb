@@ -98,7 +98,10 @@ class SupplyRoutingPolicyTest < Minitest::Test
 
     assert_raises(ArgumentError) { policy_class.new(reserve_pool_bps: 10_000) }
     assert_raises(ArgumentError) { policy_class.new(competitive_spread_bps: 0) }
-    assert_raises(ArgumentError) { @policy.positions([candidate("zero", "0", 1)]) }
+
+    invalid = candidate("invalid", "1", 1)
+    invalid.cost_usdt = BigDecimal("0")
+    assert_raises(ArgumentError) { @policy.positions([invalid]) }
   end
 
   private

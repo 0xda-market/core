@@ -21,16 +21,13 @@ class BrokerPayoutPostgresTest < Minitest::Test
       database: @database,
       path: File.expand_path("../db/migrations", __dir__)
     ).migrate!
-    connection = @database.connection
-    connection[Sequel.qualify(:market, :broker_earnings)].where(seller_user_id: SELLER_ID).delete
-    connection[Sequel.qualify(:market, :broker_payouts)].where(seller_user_id: SELLER_ID).delete
-    connection[Sequel.qualify(:market, :broker_payout_profiles)].where(seller_user_id: SELLER_ID).delete
-    connection[Sequel.qualify(:market, :users)].where(id: SELLER_ID).delete
-    connection[Sequel.qualify(:market, :users)].insert(id: SELLER_ID, role: "broker", status: "active")
+    cleanup_fixture
+    @database.connection[Sequel.qualify(:market, :users)].insert(id: SELLER_ID, role: "broker", status: "active")
     @store = ZeroXDA::Market::BrokerEarnings::PostgresStore.new(database: @database)
   end
 
   def teardown
+    cleanup_fixture if @database
     @database&.disconnect
   end
 
@@ -87,6 +84,14 @@ class BrokerPayoutPostgresTest < Minitest::Test
   end
 
   private
+
+  def cleanup_fixture
+    connection = @database.connection
+    connection[Sequel.qualify(:market, :broker_earnings)].where(seller_user_id: SELLER_ID).delete
+    connection[Sequel.qualify(:market, :broker_payouts)].where(seller_user_id: SELLER_ID).delete
+    connection[Sequel.qualify(:market, :broker_payout_profiles)].where(seller_user_id: SELLER_ID).delete
+    connection[Sequel.qualify(:market, :users)].where(id: SELLER_ID).delete
+  end
 
   def profile_record
     ZeroXDA::Market::BrokerEarnings::PayoutProfile.new(

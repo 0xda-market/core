@@ -41,6 +41,7 @@ class SupplyRoutingPolicyTest < Minitest::Test
       candidate("newer", "10", 2)
     ])
 
+    assert_equal %w[best best], positions.map(&:status)
     assert_equal [BigDecimal("0.5"), BigDecimal("0.5")], positions.map(&:estimated_share)
   end
 

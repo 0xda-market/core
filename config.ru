@@ -121,13 +121,15 @@ marketplace = ZeroXDA::Market::Marketplace::Service.new(kernel: kernel, catalog:
 public_api = ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, token: public_token, readiness: -> { store.healthy? },
                                                      identity_service: identity_service, admin_service: admin_service,
                                                      catalog: catalog, pricing: pricing, localization: localization,
-                                                     listings: listings, marketplace: marketplace, broker_orders: broker_orders)
+                                                     listings: listings, marketplace: marketplace, broker_orders: broker_orders,
+                                                     broker_earnings: broker_earnings)
 applications = { "/" => public_api }
 operator_api = nil
 if manual_provider
   operator_api = ZeroXDA::Market::Transport::ManualAPI.new(provider: manual_provider, token: operator_token,
                                                             identity_service: identity_service, catalog: catalog,
-                                                            marketplace: marketplace, settlement_provider: settlement_provider)
+                                                            marketplace: marketplace, settlement_provider: settlement_provider,
+                                                            broker_earnings: broker_earnings)
   applications["/operator"] = operator_api
 end
 if mock_payment_enabled

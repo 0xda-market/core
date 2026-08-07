@@ -11,6 +11,7 @@ module ZeroXDA
         :quote,
         :reservation,
         :product,
+        :recipient,
         :unit_price_usdt,
         :total_price_usdt,
         keyword_init: true
@@ -21,15 +22,16 @@ module ZeroXDA
         CAPABILITY = "manual.fulfillment"
         CLIENT_PRICE_SCALE = 6
 
-        def initialize(kernel:, catalog:, pricing:, listings:, settlement_provider: nil)
+        def initialize(kernel:, catalog:, pricing:, listings:, settlement_provider: nil, recipient_resolver: nil)
           @kernel = kernel
           @catalog = catalog
           @pricing = pricing
           @listings = listings
           @settlement_provider = settlement_provider
+          @recipient_resolver = recipient_resolver
         end
 
-        def quote(customer_user_id:, sku:, quantity: 1, context: {})
+        def quote(customer_user_id:, sku:, quantity: 1, recipient: nil, context: {})
           raise ArgumentError, "context must be an object" unless context.is_a?(Hash)
 
           customer_id = Core::RecordSupport.identifier(
@@ -45,6 +47,10 @@ module ZeroXDA
             )
           end
 
+          requested_quantity = quantity_value(quantity)
+          enforce_purchase_quantity!(product, requested_quantity)
+          resolved_recipient = resolve_recipient(product, customer_id, recipient)
+
           price = @pricing.current_prices[product.sku]
           unless price
             raise Core::Conflict.new(
@@ -54,7 +60,6 @@ module ZeroXDA
             )
           end
 
-          requested_quantity = quantity_value(quantity)
           unit_price = price.amount_usdt.round(
             CLIENT_PRICE_SCALE,
             BigDecimal::ROUND_CEILING
@@ -63,19 +68,21 @@ module ZeroXDA
             CLIENT_PRICE_SCALE,
             BigDecimal::ROUND_CEILING
           )
+          payload = {
+            "action" => "purchase",
+            "product" => {
+              "sku" => product.sku,
+              "name" => product.name,
+              "quantity" => requested_quantity.to_s("F"),
+              "unit_price_usdt" => unit_price.to_s("F"),
+              "total_price_usdt" => total_price.to_s("F"),
+              "currency" => "USDT"
+            }
+          }
+          payload["recipient"] = resolved_recipient.to_h if resolved_recipient
           intent = @kernel.create_intent(
             capability: CAPABILITY,
-            payload: {
-              "action" => "purchase",
-              "product" => {
-                "sku" => product.sku,
-                "name" => product.name,
-                "quantity" => requested_quantity.to_s("F"),
-                "unit_price_usdt" => unit_price.to_s("F"),
-                "total_price_usdt" => total_price.to_s("F"),
-                "currency" => "USDT"
-              }
-            },
+            payload: payload,
             context: stringify_keys(context).merge("customer_user_id" => customer_id)
           )
           quote = @kernel.quote_intent(intent.id)
@@ -85,9 +92,6 @@ module ZeroXDA
             )
           end
 
-          # Settlement cost is part of quote economics and must fail before any
-          # broker inventory is reserved. The v1 manual adapter has static costs;
-          # the composition root feeds the same CostResult into ProfitabilityPolicy.
           @kernel.settlement_cost(quote) if @kernel.respond_to?(:settlement_cost)
 
           reservation = @listings.reserve(
@@ -102,6 +106,7 @@ module ZeroXDA
             quote: quote,
             reservation: reservation,
             product: product,
+            recipient: resolved_recipient,
             unit_price_usdt: unit_price,
             total_price_usdt: total_price
           )
@@ -222,6 +227,31 @@ module ZeroXDA
         end
 
         private
+
+        def enforce_purchase_quantity!(product, quantity)
+          return unless product.metadata.dig("purchase", "quantity_mode") == "single"
+          return if quantity == BigDecimal("1")
+
+          raise Core::Conflict.new(
+            "product can only be purchased one at a time",
+            code: "single_quantity_only",
+            details: { sku: product.sku, quantity: quantity.to_s("F") }
+          )
+        end
+
+        def resolve_recipient(product, customer_id, recipient)
+          policy = product.metadata.dig("purchase", "recipient")
+          return nil unless policy
+          unless @recipient_resolver
+            raise Core::ProviderContractError.new("recipient resolver is required for this product")
+          end
+
+          @recipient_resolver.resolve(
+            product: product,
+            actor_user_id: customer_id,
+            recipient: recipient
+          )
+        end
 
         def rollback_confirmed_payment(before, confirmed)
           return unless before&.status == "payment_pending" && confirmed&.status == "accepted"

@@ -19,18 +19,20 @@ module ZeroXDA
             )
             if request.request_method == "POST" && match && @marketplace
               body = request_document(request)
-              settlement = @settlement_provider&.confirm(
+              arguments = {
                 order_id: match[1],
                 reference: body.fetch("reference"),
-                data: body.fetch("data", {}),
-                received_usdt: body["received_usdt"]
-              )
-              result = @marketplace.confirm_payment(
-                order_id: match[1],
-                reference: body.fetch("reference"),
-                data: body.fetch("data", {}),
-                settlement: settlement
-              )
+                data: body.fetch("data", {})
+              }
+              if @settlement_provider
+                arguments[:settlement] = @settlement_provider.confirm(
+                  order_id: match[1],
+                  reference: body.fetch("reference"),
+                  data: body.fetch("data", {}),
+                  received_usdt: body["received_usdt"]
+                )
+              end
+              result = @marketplace.confirm_payment(**arguments)
               return json_response(
                 200,
                 { "data" => present_payment_confirmed_order(result) }

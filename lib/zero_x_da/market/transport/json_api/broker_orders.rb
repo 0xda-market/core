@@ -61,6 +61,7 @@ module ZeroXDA
                 "payment_status" => entry.order.payment&.fetch("status", nil) || "not_required",
                 "sku" => entry.listing.sku, "product_name" => product["name"],
                 "quantity" => decimal_string(entry.reservation.quantity),
+                "recipient" => broker_recipient(entry.order.payload["recipient"]),
                 "client_total_price_usdt" => product["total_price_usdt"],
                 "currency" => product["currency"] || "USDT",
                 "broker_ask_amount" => decimal_string(entry.reservation.supply_unit_price),
@@ -80,6 +81,15 @@ module ZeroXDA
               "notification_recipient_user_id" => event && entry.reservation.customer_user_id
             }.compact
             resource
+          end
+
+          def broker_recipient(recipient)
+            return nil unless recipient.is_a?(Hash)
+
+            {
+              "provider" => recipient["provider"],
+              "username" => recipient["username"]
+            }.compact
           end
         end
 

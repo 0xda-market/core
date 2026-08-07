@@ -1,0 +1,34 @@
+{
+  "products": [
+    {
+      "sku": "premium_3m",
+      "sale_price_usdt": "13.00",
+      "supply": { "quantity": "10", "price_amount": "12.00", "currency": "USDT" }
+    },
+    {
+      "sku": "premium_6m",
+      "sale_price_usdt": "18.00",
+      "supply": { "quantity": "10", "price_amount": "17.00", "currency": "USDT" }
+    },
+    {
+      "sku": "premium_9m",
+      "sale_price_usdt": "24.00",
+      "supply": { "quantity": "10", "price_amount": "23.00", "currency": "USDT" }
+    },
+    {
+      "sku": "stars_500",
+      "sale_price_usdt": "9.00",
+      "supply": { "quantity": "10", "price_amount": "8.00", "currency": "USDT" }
+    },
+    {
+      "sku": "stars_1000",
+      "sale_price_usdt": "17.00",
+      "supply": { "quantity": "10", "price_amount": "16.00", "currency": "USDT" }
+    },
+    {
+      "sku": "stars_3000",
+      "sale_price_usdt": "49.00",
+      "supply": { "quantity": "10", "price_amount": "47.00", "currency": "USDT" }
+    }
+  ]
+}

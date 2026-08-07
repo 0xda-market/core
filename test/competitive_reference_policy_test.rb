@@ -31,7 +31,7 @@ class CompetitiveReferencePolicyTest < Minitest::Test
     )
     refute profitability.profitable?(
       client_total_usdt: client_price,
-      supply_unit_cost_usdt: "10.50000001",
+      supply_unit_cost_usdt: "10.51",
       quantity: 1
     )
   end

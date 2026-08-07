@@ -17,6 +17,7 @@ runtime = ZeroXDA::Market::Adapters::AutomaticPricingRuntime.new(
   supply_buffer_bps: Integer(ENV.fetch("MARKETPLACE_SUPPLY_BUFFER_BPS", "100")),
   variable_fee_bps: Integer(ENV.fetch("MARKETPLACE_VARIABLE_FEE_BPS", "0")),
   fixed_cost_usdt: ENV.fetch("MARKETPLACE_FIXED_COST_USDT", "0"),
+  settlement_tolerance_bps: Integer(ENV.fetch("MANUAL_SETTLEMENT_TOLERANCE_BPS", "0")),
   max_rate_age_seconds: Integer(ENV.fetch("FX_RATE_MAX_AGE_SECONDS", "3600"))
 )
 

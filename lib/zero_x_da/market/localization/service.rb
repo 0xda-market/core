@@ -17,8 +17,12 @@ module ZeroXDA
         DEFAULT_LOCALE = "en_US"
         LANGUAGE_LOCALES = {
           "en" => "en_US",
-          "uk" => "uk_UA"
+          "uk" => "uk_UA",
+          "ru" => "ru_RU",
+          "es" => "es_ES",
+          "pt" => "pt_BR"
         }.freeze
+        LOCALE_PATTERN = /\A([a-z]{2})[-_]([A-Za-z]{2})\z/
 
         def initialize(
           catalog:,
@@ -32,25 +36,31 @@ module ZeroXDA
           @max_rate_age_seconds = normalize_max_rate_age(max_rate_age_seconds)
         end
 
-        # Unsupported languages fall back to the default instead of failing:
-        # the language code comes from Telegram clients and must never break
-        # a flow.
+        # UI language and currency geography are independent. A language-only
+        # code selects canonical copy; an explicit region is retained for
+        # currency selection so ru-KZ never becomes a Russian-currency signal.
         def resolve(language_code: nil, currency: nil)
           locale = locale_for(language_code)
           requested = currency.to_s.strip
           Locale.new(
             code: locale,
-            currency: requested.empty? ? currency_for(locale) : requested.upcase
+            currency: requested.empty? ? currency_for_request(language_code, locale) : requested.upcase
           )
         end
 
         def locale_for(language_code)
-          base = language_code.to_s.downcase[/\A[a-z]{2}/]
+          raw = language_code.to_s.strip
+          match = LOCALE_PATTERN.match(raw)
+          return canonical_regional_locale(match[1], match[2]) if match
+
+          base = raw.downcase[/\A[a-z]{2}/]
           LANGUAGE_LOCALES.fetch(base, DEFAULT_LOCALE)
         end
 
-        # The default currency for a locale, driven by currency product
-        # metadata: {"locales": ["uk_UA", "uk_RU"]}.
+        # The default currency for a locale is driven by currency product
+        # metadata. Only explicit regional locales participate; language-only
+        # ru/es/pt inputs remain currency-neutral because those languages span
+        # multiple markets.
         def currency_for(locale)
           normalized = locale.to_s
           product = currencies.find do |currency|
@@ -105,6 +115,29 @@ module ZeroXDA
         end
 
         private
+
+        def canonical_regional_locale(language, region)
+          base = language.downcase
+          territory = region.upcase
+          return DEFAULT_LOCALE unless LANGUAGE_LOCALES.key?(base) || regional_skeleton_language?(base)
+
+          "#{base}_#{territory}"
+        end
+
+        def regional_skeleton_language?(language)
+          %w[de fr it pl cs hu].include?(language)
+        end
+
+        def currency_for_request(language_code, locale)
+          raw = language_code.to_s.strip
+          match = LOCALE_PATTERN.match(raw)
+          return currency_for(locale) if match
+
+          base = raw.downcase[/\A[a-z]{2}/]
+          return BASE_CURRENCY if %w[ru es pt].include?(base)
+
+          currency_for(locale)
+        end
 
         # A currency becomes usable once it has an applied price (= rate). In
         # configured runtimes, provider-managed rates also have a hard TTL so a

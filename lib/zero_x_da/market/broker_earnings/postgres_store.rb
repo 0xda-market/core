@@ -97,8 +97,15 @@ module ZeroXDA
           @payouts.insert(payout.to_h)
           payout
         rescue Sequel::UniqueConstraintViolation
-          raise Core::Conflict.new("payout could not be inserted without violating its ledger identity",
-                                   code: "payout_idempotency_conflict")
+          duplicate_key = @payouts.where(idempotency_key: payout.idempotency_key).first
+          if duplicate_key
+            raise Core::Conflict.new("payout idempotency key already exists", code: "payout_idempotency_conflict")
+          end
+          if active_payout(payout.seller_user_id)
+            raise Core::Conflict.new("broker already has an in-flight payout", code: "payout_in_flight")
+          end
+
+          raise Core::Conflict.new("payout violates a uniqueness constraint", code: "payout_conflict")
         end
 
         def find_payout(id, for_update: false)

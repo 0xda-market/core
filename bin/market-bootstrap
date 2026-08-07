@@ -1,0 +1,49 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require "json"
+require_relative "../lib/zero_x_da/market/adapters/postgres_database"
+require_relative "../lib/zero_x_da/market/catalog/postgres_store"
+require_relative "../lib/zero_x_da/market/catalog/service"
+require_relative "../lib/zero_x_da/market/identity/postgres_store"
+require_relative "../lib/zero_x_da/market/pricing/postgres_store"
+require_relative "../lib/zero_x_da/market/pricing/service"
+require_relative "../lib/zero_x_da/market/listings/postgres_store"
+require_relative "../lib/zero_x_da/market/listings/service"
+require_relative "../lib/zero_x_da/market/bootstrap/reconciler"
+
+environment = ENV.fetch("DEPLOY_ENV", "development")
+if environment == "production" && ENV["ALLOW_MARKET_BOOTSTRAP_PRODUCTION"] != "1"
+  abort "refusing to reconcile production without ALLOW_MARKET_BOOTSTRAP_PRODUCTION=1"
+end
+
+database_url = ENV.fetch("DATABASE_URL")
+actor_user_id = ENV.fetch("MARKET_BOOTSTRAP_ACTOR_USER_ID")
+manifest_path = ARGV.fetch(0) { ENV.fetch("MARKET_BOOTSTRAP_MANIFEST") }
+manifest = JSON.parse(File.read(manifest_path))
+
+database = ZeroXDA::Market::Adapters::PostgresDatabase.new(url: database_url, max_connections: 1)
+catalog = ZeroXDA::Market::Catalog::Service.new(
+  store: ZeroXDA::Market::Catalog::PostgresStore.new(database: database)
+)
+pricing = ZeroXDA::Market::Pricing::Service.new(
+  store: ZeroXDA::Market::Pricing::PostgresStore.new(database: database),
+  catalog: catalog
+)
+identity_store = ZeroXDA::Market::Identity::PostgresStore.new(database: database)
+listings = ZeroXDA::Market::Listings::Service.new(
+  store: ZeroXDA::Market::Listings::PostgresStore.new(database: database),
+  users: identity_store,
+  catalog: catalog
+)
+
+result = ZeroXDA::Market::Bootstrap::Reconciler.new(
+  pricing: pricing,
+  listings: listings,
+  actor_user_id: actor_user_id
+).reconcile(manifest)
+
+puts JSON.pretty_generate(result)
+ensure
+  database&.disconnect

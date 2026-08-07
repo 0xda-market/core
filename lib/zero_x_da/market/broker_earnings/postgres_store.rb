@@ -95,7 +95,7 @@ module ZeroXDA
         end
 
         def insert_payout(payout)
-          @payouts.insert(payout.to_h)
+          @payouts.insert(serialize_payout(payout))
           payout
         rescue Sequel::UniqueConstraintViolation
           # Unlike the pre-existing earning adapter, payout creation has no
@@ -124,7 +124,7 @@ module ZeroXDA
         end
 
         def replace_payout(payout, expected_version:)
-          count = @payouts.where(id: payout.id, version: expected_version).update(payout.to_h)
+          count = @payouts.where(id: payout.id, version: expected_version).update(serialize_payout(payout))
           return payout if count == 1
           raise Core::NotFound.new("broker_payout", payout.id) unless @payouts.where(id: payout.id).first
           raise Core::ConcurrencyConflict.new("broker_payout", payout.id)
@@ -134,6 +134,10 @@ module ZeroXDA
 
         private
 
+        def serialize_payout(payout)
+          payout.to_h.merge(provider_data: Sequel.pg_jsonb(payout.provider_data))
+        end
+
         def deserialize_earning(row)
           Earning.new(**row.slice(:id, :order_id, :reservation_id, :listing_id, :seller_user_id,
                                   :quantity, :ask_amount, :ask_currency, :payable_amount,
@@ -142,9 +146,12 @@ module ZeroXDA
         end
 
         def deserialize_payout(row)
-          Payout.new(**row.slice(:id, :seller_user_id, :currency, :network, :destination, :amount,
+          attributes = row.slice(:id, :seller_user_id, :currency, :network, :destination, :amount,
                                  :state, :idempotency_key, :external_reference, :provider_data,
-                                 :created_at, :updated_at, :paid_at, :version))
+                                 :created_at, :updated_at, :paid_at, :version)
+          provider_data = attributes.fetch(:provider_data)
+          attributes[:provider_data] = provider_data.respond_to?(:to_hash) ? provider_data.to_hash : provider_data
+          Payout.new(**attributes)
         end
       end
     end

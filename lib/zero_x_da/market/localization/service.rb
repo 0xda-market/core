@@ -2,6 +2,7 @@
 
 require "bigdecimal"
 require_relative "locale"
+require_relative "errors"
 require_relative "../pricing/client_price_presentation_policy"
 
 module ZeroXDA
@@ -77,7 +78,7 @@ module ZeroXDA
           return amount if normalized == BASE_CURRENCY
 
           rate = rate_for(normalized)
-          raise ArgumentError, "currency is not supported: #{normalized}" unless rate
+          raise RateUnavailable, "currency is not supported or its rate is stale: #{normalized}" unless rate
 
           amount / rate
         end
@@ -100,7 +101,7 @@ module ZeroXDA
           return value if normalized == BASE_CURRENCY
 
           rate = rate_for(normalized)
-          raise ArgumentError, "currency is not supported: #{normalized}" unless rate
+          raise RateUnavailable, "currency is not supported or its rate is stale: #{normalized}" unless rate
 
           (value * rate).round(8)
         end

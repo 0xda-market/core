@@ -1,0 +1,69 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require "json"
+require_relative "../lib/zero_x_da/market/adapters/automatic_pricing_runtime"
+
+interval = Integer(ENV.fetch("MARKET_PRICE_REFRESH_INTERVAL_SECONDS", "60"))
+retry_interval = Integer(ENV.fetch("MARKET_PRICE_RETRY_INTERVAL_SECONDS", "30"))
+unless interval.positive? && retry_interval.positive?
+  raise ArgumentError, "market price refresh intervals must be positive"
+end
+
+runtime = ZeroXDA::Market::Adapters::AutomaticPricingRuntime.new(
+  database_url: ENV.fetch("DATABASE_URL"),
+  minimum_margin_bps: Integer(ENV.fetch("MARKETPLACE_MIN_MARGIN_BPS", "100")),
+  supply_buffer_bps: Integer(ENV.fetch("MARKETPLACE_SUPPLY_BUFFER_BPS", "100")),
+  routing_headroom_bps: Integer(ENV.fetch("MARKETPLACE_ROUTING_HEADROOM_BPS", "500")),
+  max_uncorroborated_increase_bps: Integer(
+    ENV.fetch("MARKETPLACE_AUTO_PRICE_MAX_UNCORROBORATED_INCREASE_BPS", "1500")
+  ),
+  corroboration_spread_bps: Integer(
+    ENV.fetch("MARKETPLACE_AUTO_PRICE_CORROBORATION_SPREAD_BPS", "1000")
+  ),
+  variable_fee_bps: Integer(ENV.fetch("MARKETPLACE_VARIABLE_FEE_BPS", "0")),
+  fixed_cost_usdt: ENV.fetch("MARKETPLACE_FIXED_COST_USDT", "0"),
+  settlement_tolerance_bps: Integer(ENV.fetch("MANUAL_SETTLEMENT_TOLERANCE_BPS", "0")),
+  max_rate_age_seconds: Integer(ENV.fetch("FX_RATE_MAX_AGE_SECONDS", "3600"))
+)
+
+$stdout.sync = true
+$stderr.sync = true
+stopping = false
+%w[INT TERM].each { |signal| Signal.trap(signal) { stopping = true } }
+
+begin
+  until stopping
+    delay = interval
+    begin
+      results = runtime.refresh
+      puts JSON.generate(
+        status: "ok",
+        products: results.map do |result|
+          {
+            sku: result.sku,
+            status: result.status,
+            best_supply_usdt: result.supply_cost_usdt&.to_s("F"),
+            reference_supply_usdt: result.reference_supply_cost_usdt&.to_s("F"),
+            required_price_usdt: result.required_price_usdt&.to_s("F"),
+            price_usdt: result.price_usdt&.to_s("F"),
+            guard_reason: result.guard_reason
+          }
+        end
+      )
+    rescue StandardError => error
+      delay = retry_interval
+      warn JSON.generate(status: "error", error: error.class.name, message: error.message, retry_in_seconds: delay)
+    end
+
+    remaining = delay
+    while remaining.positive? && !stopping
+      pause = [remaining, 1].min
+      sleep(pause)
+      remaining -= pause
+    end
+  end
+ensure
+  runtime.close
+end

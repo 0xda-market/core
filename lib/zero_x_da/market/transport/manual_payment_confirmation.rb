@@ -5,8 +5,9 @@ module ZeroXDA
     module Transport
       class ManualAPI
         module PaymentConfirmation
-          def initialize(marketplace: nil, **options)
+          def initialize(marketplace: nil, settlement_provider: nil, **options)
             @marketplace = marketplace
+            @settlement_provider = settlement_provider
             super(**options)
           end
 
@@ -18,10 +19,17 @@ module ZeroXDA
             )
             if request.request_method == "POST" && match && @marketplace
               body = request_document(request)
+              settlement = @settlement_provider&.confirm(
+                order_id: match[1],
+                reference: body.fetch("reference"),
+                data: body.fetch("data", {}),
+                received_usdt: body["received_usdt"]
+              )
               result = @marketplace.confirm_payment(
                 order_id: match[1],
                 reference: body.fetch("reference"),
-                data: body.fetch("data", {})
+                data: body.fetch("data", {}),
+                settlement: settlement
               )
               return json_response(
                 200,

@@ -22,6 +22,7 @@ module ZeroXDA
               customer_user_id: body.fetch("actor_user_id"),
               sku: body.fetch("sku"),
               quantity: body.fetch("quantity", 1),
+              recipient: body["recipient"],
               context: body.fetch("context", {})
             )
             resource_response(201, present_marketplace_quote(result))
@@ -63,8 +64,9 @@ module ZeroXDA
               "unit_price_usdt" => decimal_string(result.unit_price_usdt),
               "total_price_usdt" => decimal_string(result.total_price_usdt),
               "currency" => "USDT",
-              "inventory_status" => result.reservation.status
-            )
+              "inventory_status" => result.reservation.status,
+              "recipient" => result.recipient&.to_h
+            ).compact!
             resource
           end
 
@@ -74,8 +76,9 @@ module ZeroXDA
               "quantity" => decimal_string(result.reservation.quantity),
               "inventory_status" => result.reservation.status,
               "payment_status" => result.order.payment&.fetch("status", nil) || "not_required",
-              "payment" => result.order.payment
-            )
+              "payment" => result.order.payment,
+              "recipient" => result.order.payload["recipient"]
+            ).compact!
             resource
           end
         end

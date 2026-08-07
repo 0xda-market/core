@@ -95,6 +95,7 @@ class PostgresPersistenceTest < Minitest::Test
         011_marketplace_inventory 012_payment_aware_orders
         013_broker_order_decisions 014_automated_fx_rates
         015_localization_matrix 016_settlements 017_broker_earnings
+        018_catalog_recipient_contract
       ],
       versions
     )
@@ -103,53 +104,38 @@ class PostgresPersistenceTest < Minitest::Test
   def test_product_catalog_is_seeded_and_survives_reconnection
     store = ZeroXDA::Market::Catalog::PostgresStore.new(database: @database)
 
-    assert_equal 9, store.list_products(status: "active").length
-    premium = store.find_product("premium_12m")
-    assert_equal "Telegram Premium 12 months", premium.name
-    assert_equal "Premium 12m", premium.short_name
+    assert_equal 6, store.list_products(status: "active").length
+    premium = store.find_product("premium_9m")
+    assert_equal "Telegram Premium 9 months", premium.name
+    assert_equal "Premium 9m", premium.short_name
     assert_equal "en_US", premium.locale
-    assert_equal 12, premium.metadata.fetch("duration_months")
-    assert_nil store.find_product("premium_9m")
+    assert_equal 9, premium.metadata.fetch("duration_months")
+    assert_equal "single", premium.metadata.dig("purchase", "quantity_mode")
+    assert_equal %w[self username], premium.metadata.dig("purchase", "recipient", "modes")
 
-    ukrainian = store.find_product("premium_12m", locale: "uk_UA")
-    assert_equal "Telegram Premium 12 міс.", ukrainian.name
-    assert_equal "Premium 12 міс.", ukrainian.button_label
+    ukrainian = store.find_product("premium_9m", locale: "uk_UA")
+    assert_equal "Telegram Premium 9 міс.", ukrainian.name
+    assert_equal "Premium 9 міс.", ukrainian.button_label
     assert_equal "uk_UA", ukrainian.locale
 
-    russian_kazakhstan = store.find_product("premium_12m", locale: "ru_KZ")
-    assert_equal "Telegram Premium на 12 месяцев", russian_kazakhstan.name
-    assert_equal "Premium 12 мес.", russian_kazakhstan.button_label
+    russian_kazakhstan = store.find_product("premium_9m", locale: "ru_KZ")
+    assert_equal "Telegram Premium на 9 месяцев", russian_kazakhstan.name
+    assert_equal "Premium 9 мес.", russian_kazakhstan.button_label
     assert_equal "ru_RU", russian_kazakhstan.locale
 
-    spanish_mexico = store.find_product("premium_12m", locale: "es_MX")
-    assert_equal "Telegram Premium por 12 meses", spanish_mexico.name
-    assert_equal "Premium 12 meses", spanish_mexico.button_label
-    assert_equal "es_ES", spanish_mexico.locale
-
-    portuguese_brazil = store.find_product("premium_12m", locale: "pt_BR")
-    assert_equal "Telegram Premium por 12 meses", portuguese_brazil.name
-    assert_equal "Premium 12 meses", portuguese_brazil.button_label
-    assert_equal "pt_BR", portuguese_brazil.locale
-
-    german = store.find_product("premium_12m", locale: "de_DE")
-    assert_equal "Telegram Premium 12 months", german.name
+    german = store.find_product("premium_9m", locale: "de_DE")
+    assert_equal "Telegram Premium 9 months", german.name
     assert_equal "en_US", german.locale
 
-    legacy = @database.connection[Sequel.qualify(:market, :products)]
-      .where(sku: "premium_12m")
-      .select(:name, :button_label)
-      .first
-    assert_equal "Telegram Premium 12 міс.", legacy.fetch(:name)
-    assert_equal "Premium 12 міс.", legacy.fetch(:button_label)
+    refute store.find_product("premium_12m").marketable?
 
     @database.disconnect
     @database = connect
     restarted = ZeroXDA::Market::Catalog::PostgresStore.new(database: @database)
 
     assert_equal %w[
-      premium_3m premium_6m premium_12m
+      premium_3m premium_6m premium_9m
       stars_500 stars_1000 stars_3000
-      ton btc eth
     ], restarted.list_products(status: "active").map(&:sku)
   end
 
@@ -169,7 +155,7 @@ class PostgresPersistenceTest < Minitest::Test
     rub = currencies.find { |currency| currency.sku == "rub" }
     assert_equal %w[ru_RU], rub.metadata.fetch("locales")
 
-    assert_equal 19, store.list_products(status: "active", marketable: nil).length
+    assert_equal 16, store.list_products(status: "active", marketable: nil).length
   end
 
   def test_product_price_snapshot_tracks_internal_editor_and_history
@@ -271,14 +257,14 @@ class PostgresPersistenceTest < Minitest::Test
     )
     listing = service.create(
       actor_user_id: broker.id,
-      sku: "btc",
-      quantity: "0.25",
-      price_amount: "65000.12345678",
+      sku: "stars_500",
+      quantity: "2",
+      price_amount: "10.12345678",
       currency: "USDT"
     )
-    assert_equal ["btc"], service.executable_skus(
-      client_unit_prices_usdt: { "btc" => BigDecimal("70000") },
-      quantity: "0.25"
+    assert_equal ["stars_500"], service.executable_skus(
+      client_unit_prices_usdt: { "stars_500" => BigDecimal("12") },
+      quantity: "1"
     )
 
     @database.disconnect
@@ -286,13 +272,13 @@ class PostgresPersistenceTest < Minitest::Test
     restarted = ZeroXDA::Market::Listings::PostgresStore.new(database: @database)
 
     persisted = restarted.find_listing(listing.id)
-    assert_equal BigDecimal("0.25"), persisted.quantity
-    assert_equal BigDecimal("0.25"), persisted.available_quantity
+    assert_equal BigDecimal("2"), persisted.quantity
+    assert_equal BigDecimal("2"), persisted.available_quantity
     assert_equal BigDecimal("0"), persisted.reserved_quantity
     assert_equal BigDecimal("0"), persisted.sold_quantity
-    assert_equal BigDecimal("65000.12345678"), persisted.price_amount
+    assert_equal BigDecimal("10.12345678"), persisted.price_amount
     assert_equal broker.id, persisted.seller_user_id
-    assert_equal [listing.id], restarted.available_listings(sku: "btc").map(&:id)
+    assert_equal [listing.id], restarted.available_listings(sku: "stars_500").map(&:id)
   end
 
   def test_external_identity_auth_recovers_from_a_stale_pooled_connection

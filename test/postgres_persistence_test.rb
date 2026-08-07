@@ -94,7 +94,7 @@ class PostgresPersistenceTest < Minitest::Test
         009_currencies_as_products 010_broker_listings
         011_marketplace_inventory 012_payment_aware_orders
         013_broker_order_decisions 014_automated_fx_rates
-        015_localization_matrix 016_settlements
+        015_localization_matrix 016_settlements 017_broker_earnings
       ],
       versions
     )

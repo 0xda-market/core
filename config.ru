@@ -30,6 +30,9 @@ require_relative "lib/zero_x_da/market/listings/memory_store"
 require_relative "lib/zero_x_da/market/listings/postgres_store"
 require_relative "lib/zero_x_da/market/listings/service"
 require_relative "lib/zero_x_da/market/listings/broker_order_access"
+require_relative "lib/zero_x_da/market/broker_earnings/memory_store"
+require_relative "lib/zero_x_da/market/broker_earnings/postgres_store"
+require_relative "lib/zero_x_da/market/broker_earnings/service"
 require_relative "lib/zero_x_da/market/broker_orders/memory_store"
 require_relative "lib/zero_x_da/market/broker_orders/postgres_store"
 require_relative "lib/zero_x_da/market/broker_orders/service"
@@ -52,222 +55,83 @@ raise "MANUAL_QUOTE_TTL_SECONDS must be positive" unless manual_quote_ttl.positi
 
 if environment == "production"
   raise "mock payment provider cannot be enabled in production" if mock_payment_enabled
-
-  required_secrets = {
-    "PUBLIC_API_TOKEN" => public_token,
-    "MANUAL_PROVIDER_TOKEN" => operator_token,
-    "DATABASE_URL" => database_url
-  }
-  missing = required_secrets.filter_map do |name, value|
-    name if value.nil? || value.empty?
-  end
-  unless missing.empty?
-    raise "missing required production secrets: #{missing.join(", ")}"
-  end
+  required_secrets = { "PUBLIC_API_TOKEN" => public_token, "MANUAL_PROVIDER_TOKEN" => operator_token,
+                       "DATABASE_URL" => database_url }
+  missing = required_secrets.filter_map { |name, value| name if value.nil? || value.empty? }
+  raise "missing required production secrets: #{missing.join(", ")}" unless missing.empty?
 end
 
 if mock_payment_enabled
-  required_mock_secrets = {
-    "MANUAL_PROVIDER_TOKEN" => operator_token,
-    "MOCK_PAYMENT_PROVIDER_TOKEN" => mock_payment_token
-  }
-  missing = required_mock_secrets.filter_map do |name, value|
-    name if value.nil? || value.empty?
-  end
-  unless missing.empty?
-    raise "missing required mock payment secrets: #{missing.join(", ")}"
-  end
+  required_mock_secrets = { "MANUAL_PROVIDER_TOKEN" => operator_token,
+                            "MOCK_PAYMENT_PROVIDER_TOKEN" => mock_payment_token }
+  missing = required_mock_secrets.filter_map { |name, value| name if value.nil? || value.empty? }
+  raise "missing required mock payment secrets: #{missing.join(", ")}" unless missing.empty?
 end
 
 database = if database_url && !database_url.empty?
-             ZeroXDA::Market::Adapters::PostgresDatabase.new(
-               url: database_url,
-               max_connections: Integer(ENV.fetch("DB_POOL", "5"))
-             )
+             ZeroXDA::Market::Adapters::PostgresDatabase.new(url: database_url,
+                                                              max_connections: Integer(ENV.fetch("DB_POOL", "5")))
            end
-store = database ? ZeroXDA::Market::Adapters::PostgresStore.new(database: database) :
-                   ZeroXDA::Market::Adapters::MemoryStore.new
-task_store = if database
-               ZeroXDA::Market::Adapters::PostgresManualTaskStore.new(database: database)
-             end
-identity_store = if database
-                   ZeroXDA::Market::Identity::PostgresStore.new(database: database)
-                 else
-                   ZeroXDA::Market::Identity::MemoryStore.new
-                 end
-catalog_store = if database
-                  ZeroXDA::Market::Catalog::PostgresStore.new(database: database)
-                else
-                  ZeroXDA::Market::Catalog::MemoryStore.new
-                end
+store = database ? ZeroXDA::Market::Adapters::PostgresStore.new(database: database) : ZeroXDA::Market::Adapters::MemoryStore.new
+task_store = database && ZeroXDA::Market::Adapters::PostgresManualTaskStore.new(database: database)
+identity_store = database ? ZeroXDA::Market::Identity::PostgresStore.new(database: database) : ZeroXDA::Market::Identity::MemoryStore.new
+catalog_store = database ? ZeroXDA::Market::Catalog::PostgresStore.new(database: database) : ZeroXDA::Market::Catalog::MemoryStore.new
 catalog = ZeroXDA::Market::Catalog::Service.new(store: catalog_store)
-
-pricing_store = if database
-                  ZeroXDA::Market::Pricing::PostgresStore.new(database: database)
-                else
-                  ZeroXDA::Market::Pricing::MemoryStore.new
-                end
-pricing = ZeroXDA::Market::Pricing::Service.new(
-  store: pricing_store,
-  catalog: catalog,
-  clock: clock
-)
-
-# Currencies are catalog products; their prices are the exchange rates.
-localization = ZeroXDA::Market::Localization::Service.new(
-  catalog: catalog,
-  clock: clock,
-  max_rate_age_seconds: Integer(ENV.fetch("FX_RATE_MAX_AGE_SECONDS", "3600"))
-)
-
+pricing_store = database ? ZeroXDA::Market::Pricing::PostgresStore.new(database: database) : ZeroXDA::Market::Pricing::MemoryStore.new
+pricing = ZeroXDA::Market::Pricing::Service.new(store: pricing_store, catalog: catalog, clock: clock)
+localization = ZeroXDA::Market::Localization::Service.new(catalog: catalog, clock: clock,
+                                                          max_rate_age_seconds: Integer(ENV.fetch("FX_RATE_MAX_AGE_SECONDS", "3600")))
 manual_provider = if operator_token && !operator_token.empty?
-                    ZeroXDA::Market::Providers::ManualProvider.new(
-                      key: "manual.default",
-                      clock: clock,
-                      quote_ttl: manual_quote_ttl,
-                      **(task_store ? { task_store: task_store } : {})
-                    )
+                    ZeroXDA::Market::Providers::ManualProvider.new(key: "manual.default", clock: clock,
+                                                                   quote_ttl: manual_quote_ttl,
+                                                                   **(task_store ? { task_store: task_store } : {}))
                   end
 providers = manual_provider ? { "manual.fulfillment" => manual_provider } : {}
-
-settlement_store = if database
-                     ZeroXDA::Market::Settlement::PostgresStore.new(database: database)
-                   else
-                     ZeroXDA::Market::Settlement::MemoryStore.new
-                   end
+settlement_store = database ? ZeroXDA::Market::Settlement::PostgresStore.new(database: database) : ZeroXDA::Market::Settlement::MemoryStore.new
 settlement_provider = if operator_token && !operator_token.empty?
                         ZeroXDA::Market::Settlement::ManualProvider.new(
-                          clock: clock,
-                          store: settlement_store,
-                          variable_fee_bps: Integer(
-                            ENV.fetch(
-                              "MARKETPLACE_VARIABLE_FEE_BPS",
-                              ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_VARIABLE_FEE_BPS.to_s
-                            )
-                          ),
-                          fixed_cost_usdt: ENV.fetch(
-                            "MARKETPLACE_FIXED_COST_USDT",
-                            ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_FIXED_COST_USDT.to_s("F")
-                          ),
-                          tolerance_bps: Integer(ENV.fetch("MANUAL_SETTLEMENT_TOLERANCE_BPS", "0"))
-                        )
+                          clock: clock, store: settlement_store,
+                          variable_fee_bps: Integer(ENV.fetch("MARKETPLACE_VARIABLE_FEE_BPS", ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_VARIABLE_FEE_BPS.to_s)),
+                          fixed_cost_usdt: ENV.fetch("MARKETPLACE_FIXED_COST_USDT", ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_FIXED_COST_USDT.to_s("F")),
+                          tolerance_bps: Integer(ENV.fetch("MANUAL_SETTLEMENT_TOLERANCE_BPS", "0")))
                       end
-settlement_cost = settlement_provider&.default_cost ||
-                  ZeroXDA::Market::Core::Contracts::CostResult.new(
-                    variable_fee_bps: 0,
-                    fixed_cost_usdt: 0
-                  )
-
+settlement_cost = settlement_provider&.default_cost || ZeroXDA::Market::Core::Contracts::CostResult.new(variable_fee_bps: 0, fixed_cost_usdt: 0)
 profitability = ZeroXDA::Market::Pricing::ProfitabilityPolicy.new(
-  minimum_margin_bps: Integer(
-    ENV.fetch(
-      "MARKETPLACE_MIN_MARGIN_BPS",
-      ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_MINIMUM_MARGIN_BPS.to_s
-    )
-  ),
-  supply_buffer_bps: Integer(
-    ENV.fetch(
-      "MARKETPLACE_SUPPLY_BUFFER_BPS",
-      ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_SUPPLY_BUFFER_BPS.to_s
-    )
-  ),
-  variable_fee_bps: settlement_cost.variable_fee_bps,
-  fixed_cost_usdt: settlement_cost.fixed_cost_usdt
-)
-
-kernel = ZeroXDA::Market::Core::Kernel.new(
-  providers: providers,
-  settlement: settlement_provider,
-  store: store,
-  clock: clock,
-  id_generator: SecureRandom.method(:uuid)
-)
-
-identity_service = ZeroXDA::Market::Identity::Service.new(
-  store: identity_store,
-  clock: clock
-)
-admin_service = ZeroXDA::Market::Identity::AdminService.new(
-  store: identity_store,
-  clock: clock
-)
-listings_store = if database
-                   ZeroXDA::Market::Listings::PostgresStore.new(database: database)
-                 else
-                   ZeroXDA::Market::Listings::MemoryStore.new
-                 end
-listings = ZeroXDA::Market::Listings::Service.new(
-  store: listings_store,
-  users: identity_store,
-  catalog: catalog,
-  localization: localization,
-  profitability: profitability,
-  clock: clock
-)
-broker_order_store = if database
-                       ZeroXDA::Market::BrokerOrders::PostgresStore.new(database: database)
-                     else
-                       ZeroXDA::Market::BrokerOrders::MemoryStore.new
-                     end
-broker_orders = manual_provider && ZeroXDA::Market::BrokerOrders::Service.new(
-  store: broker_order_store,
-  kernel: kernel,
-  listings: listings,
-  provider: manual_provider,
-  clock: clock
-)
-marketplace = ZeroXDA::Market::Marketplace::Service.new(
-  kernel: kernel,
-  catalog: catalog,
-  pricing: pricing,
-  listings: listings,
-  broker_orders: broker_orders,
-  settlement_provider: settlement_provider
-)
-public_api = ZeroXDA::Market::Transport::JSONAPI.new(
-  kernel: kernel,
-  token: public_token,
-  readiness: -> { store.healthy? },
-  identity_service: identity_service,
-  admin_service: admin_service,
-  catalog: catalog,
-  pricing: pricing,
-  localization: localization,
-  listings: listings,
-  marketplace: marketplace,
-  broker_orders: broker_orders
-)
-
+  minimum_margin_bps: Integer(ENV.fetch("MARKETPLACE_MIN_MARGIN_BPS", ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_MINIMUM_MARGIN_BPS.to_s)),
+  supply_buffer_bps: Integer(ENV.fetch("MARKETPLACE_SUPPLY_BUFFER_BPS", ZeroXDA::Market::Pricing::ProfitabilityPolicy::DEFAULT_SUPPLY_BUFFER_BPS.to_s)),
+  variable_fee_bps: settlement_cost.variable_fee_bps, fixed_cost_usdt: settlement_cost.fixed_cost_usdt)
+kernel = ZeroXDA::Market::Core::Kernel.new(providers: providers, settlement: settlement_provider, store: store,
+                                            clock: clock, id_generator: SecureRandom.method(:uuid))
+identity_service = ZeroXDA::Market::Identity::Service.new(store: identity_store, clock: clock)
+admin_service = ZeroXDA::Market::Identity::AdminService.new(store: identity_store, clock: clock)
+listings_store = database ? ZeroXDA::Market::Listings::PostgresStore.new(database: database) : ZeroXDA::Market::Listings::MemoryStore.new
+listings = ZeroXDA::Market::Listings::Service.new(store: listings_store, users: identity_store, catalog: catalog,
+                                                  localization: localization, profitability: profitability, clock: clock)
+earnings_store = database ? ZeroXDA::Market::BrokerEarnings::PostgresStore.new(database: database) : ZeroXDA::Market::BrokerEarnings::MemoryStore.new
+broker_earnings = ZeroXDA::Market::BrokerEarnings::Service.new(store: earnings_store, localization: localization, clock: clock)
+broker_order_store = database ? ZeroXDA::Market::BrokerOrders::PostgresStore.new(database: database) : ZeroXDA::Market::BrokerOrders::MemoryStore.new
+broker_orders = manual_provider && ZeroXDA::Market::BrokerOrders::Service.new(store: broker_order_store, kernel: kernel,
+                                                                               listings: listings, provider: manual_provider,
+                                                                               earnings: broker_earnings, clock: clock)
+marketplace = ZeroXDA::Market::Marketplace::Service.new(kernel: kernel, catalog: catalog, pricing: pricing, listings: listings,
+                                                        broker_orders: broker_orders, settlement_provider: settlement_provider)
+public_api = ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, token: public_token, readiness: -> { store.healthy? },
+                                                     identity_service: identity_service, admin_service: admin_service,
+                                                     catalog: catalog, pricing: pricing, localization: localization,
+                                                     listings: listings, marketplace: marketplace, broker_orders: broker_orders)
 applications = { "/" => public_api }
 operator_api = nil
-
 if manual_provider
-  operator_api = ZeroXDA::Market::Transport::ManualAPI.new(
-    provider: manual_provider,
-    token: operator_token,
-    identity_service: identity_service,
-    catalog: catalog,
-    marketplace: marketplace,
-    settlement_provider: settlement_provider
-  )
+  operator_api = ZeroXDA::Market::Transport::ManualAPI.new(provider: manual_provider, token: operator_token,
+                                                            identity_service: identity_service, catalog: catalog,
+                                                            marketplace: marketplace, settlement_provider: settlement_provider)
   applications["/operator"] = operator_api
 end
-
 if mock_payment_enabled
-  confirmation_client = ZeroXDA::Market::Payments::RackConfirmationClient.new(
-    app: operator_api,
-    token: operator_token
-  )
-  mock_payment_provider = ZeroXDA::Market::Payments::MockProvider.new(
-    kernel: kernel,
-    confirmation_client: confirmation_client,
-    clock: clock,
-    id_generator: SecureRandom.method(:uuid)
-  )
-  applications["/mock-payments"] = ZeroXDA::Market::Transport::MockPaymentAPI.new(
-    provider: mock_payment_provider,
-    token: mock_payment_token
-  )
+  confirmation_client = ZeroXDA::Market::Payments::RackConfirmationClient.new(app: operator_api, token: operator_token)
+  mock_payment_provider = ZeroXDA::Market::Payments::MockProvider.new(kernel: kernel, confirmation_client: confirmation_client,
+                                                                      clock: clock, id_generator: SecureRandom.method(:uuid))
+  applications["/mock-payments"] = ZeroXDA::Market::Transport::MockPaymentAPI.new(provider: mock_payment_provider,
+                                                                                   token: mock_payment_token)
 end
-
 run Rack::URLMap.new(applications)

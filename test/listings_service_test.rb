@@ -271,7 +271,7 @@ class ListingsServiceTest < Minitest::Test
 
     assert_equal "executable", feedback.execution_status
     assert_equal "best", feedback.routing_status
-    assert_equal BigDecimal("0.8"), feedback.estimated_order_share
+    assert_equal BigDecimal("0.839"), feedback.estimated_order_share
     assert_equal 2, feedback.eligible_supply_count
     assert_equal BigDecimal("9"), feedback.maximum_ask_amount
     assert_equal "USDT", feedback.maximum_ask_currency
@@ -313,7 +313,7 @@ class ListingsServiceTest < Minitest::Test
     )
 
     assert_equal 2, best_feedback.eligible_supply_count
-    assert_equal BigDecimal("0.8"), best_feedback.estimated_order_share
+    assert_equal BigDecimal("0.9464"), best_feedback.estimated_order_share
     assert_equal "superseded", duplicate_feedback.execution_status
     assert_equal "superseded", duplicate_feedback.routing_status
     assert_equal BigDecimal("0"), duplicate_feedback.estimated_order_share

@@ -115,23 +115,25 @@ module ZeroXDA
           quote = @kernel.find_quote(quote_id)
           intent = @kernel.find_intent(quote.intent_id)
           product = intent.payload.fetch("product")
+          payment = {
+            "status" => "pending",
+            "amount" => product.fetch("total_price_usdt"),
+            "currency" => product.fetch("currency"),
+            "expires_at" => reservation.expires_at.iso8601(6),
+            "idempotency_key" => "quotes/#{quote_id}/payment"
+          }
+          payment["settlement_required"] = true if @settlement_provider
           order = @kernel.accept_quote(
             quote_id,
             initial_status: "payment_pending",
-            payment: {
-              "status" => "pending",
-              "amount" => product.fetch("total_price_usdt"),
-              "currency" => product.fetch("currency"),
-              "expires_at" => reservation.expires_at.iso8601(6),
-              "idempotency_key" => "quotes/#{quote_id}/payment"
-            }
+            payment: payment
           )
           reservation = @listings.await_payment(
             customer_user_id: customer_id,
             quote_id: quote_id,
             order_id: order.id
           )
-          @kernel.charge_settlement(order.id) if @kernel.respond_to?(:charge_settlement)
+          @kernel.charge_settlement(order.id) if @settlement_provider
           OrderResult.new(order: order, reservation: reservation)
         rescue StandardError
           begin
@@ -157,9 +159,8 @@ module ZeroXDA
 
           if settlement
             @kernel.verify_settlement(settlement)
-          elsif @settlement_provider
-            current = @settlement_provider.find_by_order(order_id)
-            @kernel.verify_settlement(current) if current
+          elsif @settlement_provider && before.payment["settlement_required"]
+            @kernel.verify_settlement(@settlement_provider.find_by_order(order_id))
           end
 
           confirmed = @kernel.confirm_order_payment(

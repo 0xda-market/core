@@ -16,6 +16,12 @@ runtime = ZeroXDA::Market::Adapters::AutomaticPricingRuntime.new(
   minimum_margin_bps: Integer(ENV.fetch("MARKETPLACE_MIN_MARGIN_BPS", "100")),
   supply_buffer_bps: Integer(ENV.fetch("MARKETPLACE_SUPPLY_BUFFER_BPS", "100")),
   routing_headroom_bps: Integer(ENV.fetch("MARKETPLACE_ROUTING_HEADROOM_BPS", "500")),
+  max_uncorroborated_increase_bps: Integer(
+    ENV.fetch("MARKETPLACE_AUTO_PRICE_MAX_UNCORROBORATED_INCREASE_BPS", "1500")
+  ),
+  corroboration_spread_bps: Integer(
+    ENV.fetch("MARKETPLACE_AUTO_PRICE_CORROBORATION_SPREAD_BPS", "1000")
+  ),
   variable_fee_bps: Integer(ENV.fetch("MARKETPLACE_VARIABLE_FEE_BPS", "0")),
   fixed_cost_usdt: ENV.fetch("MARKETPLACE_FIXED_COST_USDT", "0"),
   settlement_tolerance_bps: Integer(ENV.fetch("MANUAL_SETTLEMENT_TOLERANCE_BPS", "0")),
@@ -40,7 +46,9 @@ begin
             status: result.status,
             best_supply_usdt: result.supply_cost_usdt&.to_s("F"),
             reference_supply_usdt: result.reference_supply_cost_usdt&.to_s("F"),
-            price_usdt: result.price_usdt&.to_s("F")
+            required_price_usdt: result.required_price_usdt&.to_s("F"),
+            price_usdt: result.price_usdt&.to_s("F"),
+            guard_reason: result.guard_reason
           }
         end
       )

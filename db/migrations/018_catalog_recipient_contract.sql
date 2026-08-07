@@ -2,6 +2,14 @@
 -- semantics explicit in product metadata. Currency rows remain platform
 -- reference data (marketable=false) and therefore are not buyer products.
 
+-- Positions are globally unique. Free the buyer slots before restoring 9m;
+-- historical rows keep their relative order outside the buyer range.
+UPDATE market.products
+SET position = position + 1000,
+    updated_at = now(),
+    version = version + 1
+WHERE position BETWEEN 1 AND 6;
+
 INSERT INTO market.products (
   sku, short_name, metadata, status, position, created_at, updated_at,
   version, marketable, name, button_label

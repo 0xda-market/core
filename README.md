@@ -48,7 +48,7 @@ and enforced by architecture tests.
 - provider-neutral users and external identities;
 - internal-UUID administrator authorization;
 - localized product catalog and append-only price history;
-- fixed administrator client pricing with a server-side positive-margin supply gate;
+- market-owned automatic client pricing with broker-safe routing headroom and a server-side profitability gate;
 - private price-ranked broker routing with bounded reserve traffic;
 - provider-backed, append-only FX snapshots with a hard freshness gate;
 - exact localized conversion followed by currency-aware upward presentation;
@@ -123,7 +123,7 @@ curl -sS http://localhost:9292/operator/v1/auth/external \
   -d '{
     "provider": "telegram",
     "provider_user_id": "123456789",
-    "provider_data": {"chat_id": "123456789"}
+    "provider_data": {"chat_id":"123456789"}
   }'
 ```
 
@@ -165,8 +165,17 @@ status, metadata and current USDT price snapshot.
 is `en_US`; `uk_UA` is seeded for the initial catalog. Resolution falls back from
 the requested locale to `en_US`, then to the product short name.
 
-`market.product_prices` is append-only history. Every editor is recorded through
-`market.users.id`, never through an external provider identifier.
+`market.product_prices` is append-only history. Administrator prices use source
+`admin`; automatic market prices use `core`; provider FX rows use `fx:<provider>`.
+The latest row is the authoritative current price.
+
+For active + marketable products, automatic pricing anchors on the best valid
+unit-executable broker ask, adds a bounded market-owned routing headroom, then
+uses the same profitability policy enforced during reservation. The default
+headroom is 500 bps (5%), so brokers close to the best ask can remain executable
+without allowing an expensive competitor to push the buyer price upward. The
+worker may create or raise a price but does not automatically lower a profitable
+price. See [`docs/architecture/automatic-pricing.md`](docs/architecture/automatic-pricing.md).
 
 The initial marketable catalog contains:
 
@@ -221,6 +230,7 @@ PUBLIC_API_TOKEN=client-secret \
 MANUAL_PROVIDER_TOKEN=operator-secret \
 MARKETPLACE_MIN_MARGIN_BPS=100 \
 MARKETPLACE_SUPPLY_BUFFER_BPS=100 \
+MARKETPLACE_ROUTING_HEADROOM_BPS=500 \
 DATABASE_URL='postgresql://postgres:password@localhost:5432/0xda_market' \
 bundle exec rackup
 ```
@@ -231,11 +241,14 @@ API tokens and `DATABASE_URL`.
 
 Core runtime variables do not include channel tokens or webhook secrets.
 
-Marketplace pricing treats the administrator price as a floor and raises it only
-when the cheapest executable broker supply would otherwise miss the configured
-net margin. `MARKETPLACE_VARIABLE_FEE_BPS` and
-`MARKETPLACE_FIXED_COST_USDT` add provider-neutral variable and fixed execution
-costs; both default to zero until a settlement adapter supplies a cost contract.
+Automatic marketplace pricing treats the best valid broker ask as an anchor,
+not as the buyer price. `MARKETPLACE_ROUTING_HEADROOM_BPS` creates bounded room
+for competitive broker routing; `MARKETPLACE_MIN_MARGIN_BPS` and
+`MARKETPLACE_SUPPLY_BUFFER_BPS` then protect market solvency.
+`MARKETPLACE_VARIABLE_FEE_BPS` and `MARKETPLACE_FIXED_COST_USDT` add the same
+provider-neutral settlement costs used by execution. Automatic pricing never
+reduces the broker's promised ask and reservation profitability is revalidated
+against the actual selected broker before inventory mutation.
 
 FX acquisition is step 0 of localized pricing. A separate `fx-refresh` process
 reads Coinbase's public USDT exchange-rate snapshot every five minutes, inverts

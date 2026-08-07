@@ -7,6 +7,7 @@ require_relative "../pricing/postgres_store"
 require_relative "../pricing/service"
 require_relative "../pricing/profitability_policy"
 require_relative "../pricing/competitive_reference_policy"
+require_relative "../pricing/automatic_price_increase_policy"
 require_relative "../pricing/automatic_service"
 require_relative "../localization/service"
 require_relative "../listings/postgres_store"
@@ -26,6 +27,10 @@ module ZeroXDA
           settlement_tolerance_bps:,
           max_rate_age_seconds:,
           routing_headroom_bps: Pricing::CompetitiveReferencePolicy::DEFAULT_ROUTING_HEADROOM_BPS,
+          max_uncorroborated_increase_bps:
+            Pricing::AutomaticPriceIncreasePolicy::DEFAULT_MAX_UNCORROBORATED_INCREASE_BPS,
+          corroboration_spread_bps:
+            Pricing::AutomaticPriceIncreasePolicy::DEFAULT_CORROBORATION_SPREAD_BPS,
           clock: -> { Time.now.utc },
           database: nil
         )
@@ -65,13 +70,18 @@ module ZeroXDA
           reference_policy = Pricing::CompetitiveReferencePolicy.new(
             routing_headroom_bps: routing_headroom_bps
           )
+          increase_policy = Pricing::AutomaticPriceIncreasePolicy.new(
+            max_uncorroborated_increase_bps: max_uncorroborated_increase_bps,
+            corroboration_spread_bps: corroboration_spread_bps
+          )
           @service = Pricing::AutomaticService.new(
             catalog: catalog,
             pricing: pricing,
             listings_store: Listings::PostgresStore.new(database: @database),
             localization: localization,
             profitability: profitability,
-            reference_policy: reference_policy
+            reference_policy: reference_policy,
+            increase_policy: increase_policy
           )
         end
 

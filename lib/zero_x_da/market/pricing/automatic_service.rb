@@ -166,10 +166,6 @@ module ZeroXDA
         def amount_usdt(amount, currency)
           return BigDecimal(amount.to_s) if currency == "USDT"
 
-          unless @localization.supported_currency?(currency)
-            raise Localization::RateUnavailable, "currency rate is unavailable: #{currency}"
-          end
-
           @localization.amount_usdt(amount: amount, currency: currency)
         end
       end

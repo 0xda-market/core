@@ -36,7 +36,7 @@ class CompetitiveReferencePolicyTest < Minitest::Test
     )
   end
 
-  def test_auto_price_preserves_the_two_broker_80_20_routing_contract
+  def test_auto_price_preserves_competitive_execution_and_price_sensitive_routing
     reference = ZeroXDA::Market::Pricing::CompetitiveReferencePolicy.new
     profitability = ZeroXDA::Market::Pricing::ProfitabilityPolicy.new(
       minimum_margin_bps: 100,
@@ -68,9 +68,9 @@ class CompetitiveReferencePolicyTest < Minitest::Test
 
     assert_equal 2, positions.length
     assert_equal "best", positions[0].status
-    assert_equal BigDecimal("0.8"), positions[0].estimated_share
+    assert_equal BigDecimal("0.7118"), positions[0].estimated_share
     assert_equal "competitive", positions[1].status
-    assert_equal BigDecimal("0.2"), positions[1].estimated_share
+    assert_equal BigDecimal("0.2882"), positions[1].estimated_share
   end
 
   def test_headroom_is_market_owned_and_deterministic

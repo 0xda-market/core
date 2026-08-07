@@ -7,12 +7,12 @@ module ZeroXDA
   module Market
     module Listings
       # Routes profitable supply without exposing competitor asks. Price is the
-      # primary rank signal; creation time and id only make equal asks stable.
-      # A quote id provides an unpredictable, replay-stable allocation seed.
+      # primary allocation signal; creation time and id only make equal asks
+      # stable. A quote id provides an unpredictable, replay-stable seed.
       class SupplyRoutingPolicy
         BASIS_POINTS = 10_000
-        BEST_SHARE_BPS = 7_000
-        COMPETITIVE_SHARE_BPS = 2_000
+        DEFAULT_RESERVE_POOL_BPS = 1_000
+        DEFAULT_COMPETITIVE_SPREAD_BPS = 1_000
 
         Candidate = Struct.new(:listing, :cost_usdt, keyword_init: true)
         Position = Struct.new(
@@ -23,64 +23,130 @@ module ZeroXDA
           keyword_init: true
         )
 
+        def initialize(
+          reserve_pool_bps: DEFAULT_RESERVE_POOL_BPS,
+          competitive_spread_bps: DEFAULT_COMPETITIVE_SPREAD_BPS
+        )
+          @reserve_pool_bps = basis_points(
+            reserve_pool_bps,
+            field: "reserve_pool_bps",
+            minimum: 0,
+            maximum: BASIS_POINTS - 1
+          )
+          @competitive_spread_bps = basis_points(
+            competitive_spread_bps,
+            field: "competitive_spread_bps",
+            minimum: 1,
+            maximum: BASIS_POINTS
+          )
+        end
+
         def positions(candidates)
-          ranked = candidates.sort_by do |candidate|
-            listing = candidate.listing
-            [candidate.cost_usdt, listing.created_at, listing.id]
-          end
+          ranked, allocations, scores = routing_plan(candidates)
           ranked.each_with_index.map do |candidate, rank|
             Position.new(
               candidate: candidate,
               rank: rank,
-              status: status_for(rank),
-              estimated_share: share_for(rank, ranked.length)
+              status: status_for(rank, scores.fetch(rank)),
+              estimated_share: BigDecimal(allocations.fetch(rank).to_s) / BASIS_POINTS
             ).freeze
           end.freeze
         end
 
         def select(candidates, seed:)
-          ranked = positions(candidates)
+          ranked, allocations, = routing_plan(candidates)
           return nil if ranked.empty?
-          return ranked.first.candidate if ranked.length == 1
+          return ranked.first if ranked.length == 1
 
-          bucket = deterministic_bucket(seed, "primary")
-          if ranked.length == 2
-            return ranked[bucket < BEST_SHARE_BPS + reserve_share_bps(ranked.length) ? 0 : 1].candidate
+          bucket = deterministic_bucket(seed, "allocation")
+          cumulative = 0
+          ranked.each_with_index do |candidate, index|
+            cumulative += allocations.fetch(index)
+            return candidate if bucket < cumulative
           end
 
-          return ranked[0].candidate if bucket < BEST_SHARE_BPS
-          return ranked[1].candidate if bucket < BEST_SHARE_BPS + COMPETITIVE_SHARE_BPS
-
-          reserve = ranked.drop(2)
-          reserve.fetch(deterministic_bucket(seed, "reserve") % reserve.length).candidate
+          ranked.last
         end
 
         private
 
-        def status_for(rank)
+        def routing_plan(candidates)
+          ranked = candidates.sort_by do |candidate|
+            listing = candidate.listing
+            [candidate_cost(candidate), listing.created_at, listing.id]
+          end
+          return [ranked.freeze, [].freeze, [].freeze] if ranked.empty?
+          return [ranked.freeze, [BASIS_POINTS].freeze, [1].freeze] if ranked.length == 1
+
+          best_cost = candidate_cost(ranked.first)
+          scores = ranked.map do |candidate|
+            competitive_score(candidate_cost(candidate), best_cost)
+          end
+          reserve = reserve_allocations(ranked.length)
+          performance = proportional_allocations(
+            scores,
+            total_bps: BASIS_POINTS - @reserve_pool_bps
+          )
+          allocations = reserve.each_index.map do |index|
+            reserve.fetch(index) + performance.fetch(index)
+          end
+
+          [ranked.freeze, allocations.freeze, scores.freeze]
+        end
+
+        def competitive_score(cost, best_cost)
+          gap_bps = relative_gap_bps(cost, best_cost)
+          return 0 if gap_bps >= @competitive_spread_bps
+
+          remaining = @competitive_spread_bps - gap_bps
+          remaining * remaining
+        end
+
+        def relative_gap_bps(cost, best_cost)
+          ((((cost / best_cost) - 1) * BASIS_POINTS).floor).clamp(0, BASIS_POINTS)
+        end
+
+        def reserve_allocations(count)
+          base = @reserve_pool_bps / count
+          remainder = @reserve_pool_bps % count
+          Array.new(count) do |index|
+            base + (index < remainder ? 1 : 0)
+          end
+        end
+
+        def proportional_allocations(scores, total_bps:)
+          score_total = scores.sum
+          base = scores.map { |score| (total_bps * score) / score_total }
+          remainders = scores.each_index.map do |index|
+            [(total_bps * scores.fetch(index)) % score_total, index]
+          end
+          remaining = total_bps - base.sum
+          remainders.sort_by { |remainder, index| [-remainder, index] }
+                    .first(remaining)
+                    .each { |_, index| base[index] += 1 }
+          base
+        end
+
+        def status_for(rank, score)
           return "best" if rank.zero?
-          return "competitive" if rank == 1
+          return "competitive" if score.positive?
 
           "unlikely"
         end
 
-        def share_for(rank, count)
-          basis_points = if count == 1
-                           BASIS_POINTS
-                         elsif count == 2
-                           rank.zero? ? BEST_SHARE_BPS + reserve_share_bps(count) : COMPETITIVE_SHARE_BPS
-                         elsif rank.zero?
-                           BEST_SHARE_BPS
-                         elsif rank == 1
-                           COMPETITIVE_SHARE_BPS
-                         else
-                           reserve_share_bps(count) / (count - 2)
-                         end
-          BigDecimal(basis_points.to_s) / BASIS_POINTS
+        def candidate_cost(candidate)
+          cost = BigDecimal(candidate.cost_usdt.to_s)
+          raise ArgumentError, "routing candidate cost must be positive" unless cost.positive?
+
+          cost
         end
 
-        def reserve_share_bps(_count)
-          BASIS_POINTS - BEST_SHARE_BPS - COMPETITIVE_SHARE_BPS
+        def basis_points(value, field:, minimum:, maximum:)
+          unless value.is_a?(Integer) && value.between?(minimum, maximum)
+            raise ArgumentError, "#{field} must be an integer between #{minimum} and #{maximum}"
+          end
+
+          value
         end
 
         def deterministic_bucket(seed, namespace)

@@ -50,10 +50,11 @@ module ZeroXDA
           @earnings.insert(earning.to_h)
           earning
         rescue Sequel::UniqueConstraintViolation
-          existing = find_by_order(earning.order_id)
-          return existing if existing&.seller_user_id == earning.seller_user_id
-          raise Core::Conflict.new("broker earning already exists", code: "duplicate_broker_earning",
-                                   details: { order_id: earning.order_id })
+          raise Core::Conflict.new(
+            "broker earning violates a uniqueness constraint",
+            code: "duplicate_broker_earning",
+            details: { order_id: earning.order_id }
+          )
         end
 
         def replace(earning, expected_version:)
@@ -97,14 +98,10 @@ module ZeroXDA
           @payouts.insert(payout.to_h)
           payout
         rescue Sequel::UniqueConstraintViolation
-          duplicate_key = @payouts.where(idempotency_key: payout.idempotency_key).first
-          if duplicate_key
-            raise Core::Conflict.new("payout idempotency key already exists", code: "payout_idempotency_conflict")
-          end
-          if active_payout(payout.seller_user_id)
-            raise Core::Conflict.new("broker already has an in-flight payout", code: "payout_in_flight")
-          end
-
+          # Do not issue follow-up SELECTs here: PostgreSQL keeps the surrounding
+          # transaction in the failed state until rollback. Normal service paths
+          # classify in-flight retries before insertion under the locked profile;
+          # this is the database backstop for races or direct adapter writes.
           raise Core::Conflict.new("payout violates a uniqueness constraint", code: "payout_conflict")
         end
 

@@ -94,6 +94,7 @@ class PostgresPersistenceTest < Minitest::Test
         009_currencies_as_products 010_broker_listings
         011_marketplace_inventory 012_payment_aware_orders
         013_broker_order_decisions 014_automated_fx_rates
+        015_localization_matrix
       ],
       versions
     )
@@ -114,6 +115,25 @@ class PostgresPersistenceTest < Minitest::Test
     assert_equal "Telegram Premium 12 міс.", ukrainian.name
     assert_equal "Premium 12 міс.", ukrainian.button_label
     assert_equal "uk_UA", ukrainian.locale
+
+    russian_kazakhstan = store.find_product("premium_12m", locale: "ru_KZ")
+    assert_equal "Telegram Premium на 12 месяцев", russian_kazakhstan.name
+    assert_equal "Premium 12 мес.", russian_kazakhstan.button_label
+    assert_equal "ru_RU", russian_kazakhstan.locale
+
+    spanish_mexico = store.find_product("premium_12m", locale: "es_MX")
+    assert_equal "Telegram Premium por 12 meses", spanish_mexico.name
+    assert_equal "Premium 12 meses", spanish_mexico.button_label
+    assert_equal "es_ES", spanish_mexico.locale
+
+    portuguese_brazil = store.find_product("premium_12m", locale: "pt_BR")
+    assert_equal "Telegram Premium por 12 meses", portuguese_brazil.name
+    assert_equal "Premium 12 meses", portuguese_brazil.button_label
+    assert_equal "pt_BR", portuguese_brazil.locale
+
+    german = store.find_product("premium_12m", locale: "de_DE")
+    assert_equal "Telegram Premium 12 months", german.name
+    assert_equal "en_US", german.locale
 
     legacy = @database.connection[Sequel.qualify(:market, :products)]
       .where(sku: "premium_12m")
@@ -143,6 +163,11 @@ class PostgresPersistenceTest < Minitest::Test
 
     usdt = currencies.find { |currency| currency.sku == "usdt" }
     assert_equal BigDecimal("1"), usdt.current_price_usdt
+
+    eur = currencies.find { |currency| currency.sku == "eur" }
+    assert_equal %w[de_DE fr_FR it_IT es_ES], eur.metadata.fetch("locales")
+    rub = currencies.find { |currency| currency.sku == "rub" }
+    assert_equal %w[ru_RU], rub.metadata.fetch("locales")
 
     assert_equal 19, store.list_products(status: "active", marketable: nil).length
   end

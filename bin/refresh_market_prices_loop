@@ -15,6 +15,7 @@ runtime = ZeroXDA::Market::Adapters::AutomaticPricingRuntime.new(
   database_url: ENV.fetch("DATABASE_URL"),
   minimum_margin_bps: Integer(ENV.fetch("MARKETPLACE_MIN_MARGIN_BPS", "100")),
   supply_buffer_bps: Integer(ENV.fetch("MARKETPLACE_SUPPLY_BUFFER_BPS", "100")),
+  routing_headroom_bps: Integer(ENV.fetch("MARKETPLACE_ROUTING_HEADROOM_BPS", "500")),
   variable_fee_bps: Integer(ENV.fetch("MARKETPLACE_VARIABLE_FEE_BPS", "0")),
   fixed_cost_usdt: ENV.fetch("MARKETPLACE_FIXED_COST_USDT", "0"),
   settlement_tolerance_bps: Integer(ENV.fetch("MANUAL_SETTLEMENT_TOLERANCE_BPS", "0")),
@@ -33,7 +34,15 @@ begin
       results = runtime.refresh
       puts JSON.generate(
         status: "ok",
-        products: results.map { |result| { sku: result.sku, status: result.status, price_usdt: result.price_usdt&.to_s("F") } }
+        products: results.map do |result|
+          {
+            sku: result.sku,
+            status: result.status,
+            best_supply_usdt: result.supply_cost_usdt&.to_s("F"),
+            reference_supply_usdt: result.reference_supply_cost_usdt&.to_s("F"),
+            price_usdt: result.price_usdt&.to_s("F")
+          }
+        end
       )
     rescue StandardError => error
       delay = retry_interval

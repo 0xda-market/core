@@ -118,6 +118,25 @@ class BrokerPayoutsTest < Minitest::Test
     assert_equal "payout_already_paid", error.code
   end
 
+  def test_confirmation_fails_closed_when_attached_earnings_no_longer_match_payout_amount
+    create_available_earning(order_id: "order-1", seller: "broker-1", unit_price: "10", quantity: "1")
+    @service.save_payout_profile(actor_user_id: "broker-1", network: "TRON", destination: "TWallet")
+    payout = @service.queue_payout(actor_user_id: "broker-1")
+
+    earning = @store.list_by_payout(payout.id).first
+    corrupted = ZeroXDA::Market::BrokerEarnings::Earning.new(
+      **earning.to_h.merge(payable_amount: BigDecimal("9"), version: earning.version + 1)
+    )
+    @store.transaction { |store| store.replace(corrupted, expected_version: earning.version) }
+
+    error = assert_raises(ZeroXDA::Market::Core::Conflict) do
+      @service.confirm_payout(payout_id: payout.id, external_reference: "tx-corrupt")
+    end
+    assert_equal "payout_integrity_mismatch", error.code
+    assert_equal "queued", @service.list_payouts(actor_user_id: "broker-1").first.state
+    assert_equal "payout_queued", @service.list(actor_user_id: "broker-1").first.state
+  end
+
   def test_same_external_reference_cannot_pay_two_payouts_on_same_network
     first = queue_for(seller: "broker-1", order_id: "order-1", destination: "TOne")
     second = queue_for(seller: "broker-2", order_id: "order-2", destination: "TTwo")

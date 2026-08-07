@@ -34,18 +34,16 @@ class AutomaticPricingServiceTest < Minitest::Test
   end
 
   class Localization
-    def supported_currency?(currency) = %w[USDT UAH].include?(currency)
-
     def amount_usdt(amount:, currency:)
-      raise ArgumentError, "unexpected currency" unless currency == "UAH"
+      unless currency == "UAH"
+        raise ZeroXDA::Market::Localization::RateUnavailable, "stale or unsupported FX"
+      end
 
       BigDecimal(amount.to_s) / 40
     end
   end
 
   class BrokenLocalization < Localization
-    def supported_currency?(_currency) = true
-
     def amount_usdt(amount:, currency:)
       raise ArgumentError, "unexpected adapter bug" if currency == "BUG"
 

@@ -95,7 +95,7 @@ class PostgresPersistenceTest < Minitest::Test
         011_marketplace_inventory 012_payment_aware_orders
         013_broker_order_decisions 014_automated_fx_rates
         015_localization_matrix 016_settlements 017_broker_earnings
-        018_catalog_recipient_contract
+        018_catalog_recipient_contract 019_broker_payout_guards
       ],
       versions
     )

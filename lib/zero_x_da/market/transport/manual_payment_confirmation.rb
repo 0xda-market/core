@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "manual_payout_confirmation"
+
 module ZeroXDA
   module Market
     module Transport

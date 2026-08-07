@@ -55,7 +55,7 @@ class BrokerPayoutPostgresTest < Minitest::Test
     error = assert_raises(ZeroXDA::Market::Core::Conflict) do
       @store.transaction { |store| store.insert_payout(payout_record(id: PAYOUT_TWO, key: "two")) }
     end
-    assert_equal "payout_idempotency_conflict", error.code
+    assert_equal "payout_conflict", error.code
   end
 
   def test_database_rejects_duplicate_reference_on_same_network

@@ -188,7 +188,7 @@ jobs:
           if [[ "$FORCE_ACTIVATE" == "1" || "$active_environment" == "$DEPLOY_ENV" ]]; then
             if ! DEPLOY_MODE=activate bash "$release_dir/deploy/vps/deploy.sh"; then
               if [[ -n "$previous_release" && -d "$previous_release/deploy/vps" ]]; then
-                DEPLOY_MODE=activate bash "$previous_release/deploy/vps/deploy.sh" || true
+                bash "$release_dir/deploy/vps/rollback.sh" "$previous_release" "$shared_env" || true
               fi
               exit 1
             fi

@@ -1,9 +1,15 @@
 -- Keep the buyer-facing catalog intentionally small and make the purchase
 -- semantics explicit in product metadata. Currency rows remain platform
 -- reference data (marketable=false) and therefore are not buyer products.
+--
+-- This migration is deliberately recovery-safe. Development/test environments
+-- may have had catalog rows cleared while retaining schema_migrations. Rebuild
+-- the six canonical Telegram products before inserting localizations so a
+-- partially emptied catalog cannot violate the localization foreign key.
 
--- Positions are globally unique. Free the buyer slots before restoring 9m;
--- historical rows keep their relative order outside the buyer range.
+-- Positions are globally unique. Free the buyer slots before restoring the
+-- canonical six products; historical rows keep their relative order outside
+-- the buyer range.
 UPDATE market.products
 SET position = position + 1000,
     updated_at = now(),
@@ -14,44 +20,53 @@ INSERT INTO market.products (
   sku, short_name, metadata, status, position, created_at, updated_at,
   version, marketable, name, button_label
 )
-VALUES (
-  'premium_9m',
-  'Premium 9m',
-  '{"family":"telegram_premium","duration_months":9,"purchase":{"quantity_mode":"single","recipient":{"provider":"telegram","modes":["self","username"],"eligibility":{"is_premium":false},"ineligible_code":"premium_already_active"}}}'::jsonb,
-  'active', 3, now(), now(), 0, true,
-  'Telegram Premium 9 months', 'Premium 9m'
-)
+VALUES
+  (
+    'premium_3m', 'Premium 3m',
+    '{"family":"telegram_premium","duration_months":3,"purchase":{"quantity_mode":"single","recipient":{"provider":"telegram","modes":["self","username"],"eligibility":{"is_premium":false},"ineligible_code":"premium_already_active"}}}'::jsonb,
+    'active', 1, now(), now(), 0, true,
+    'Telegram Premium 3 months', 'Premium 3m'
+  ),
+  (
+    'premium_6m', 'Premium 6m',
+    '{"family":"telegram_premium","duration_months":6,"purchase":{"quantity_mode":"single","recipient":{"provider":"telegram","modes":["self","username"],"eligibility":{"is_premium":false},"ineligible_code":"premium_already_active"}}}'::jsonb,
+    'active', 2, now(), now(), 0, true,
+    'Telegram Premium 6 months', 'Premium 6m'
+  ),
+  (
+    'premium_9m', 'Premium 9m',
+    '{"family":"telegram_premium","duration_months":9,"purchase":{"quantity_mode":"single","recipient":{"provider":"telegram","modes":["self","username"],"eligibility":{"is_premium":false},"ineligible_code":"premium_already_active"}}}'::jsonb,
+    'active', 3, now(), now(), 0, true,
+    'Telegram Premium 9 months', 'Premium 9m'
+  ),
+  (
+    'stars_500', 'Stars 500',
+    '{"family":"telegram_stars","amount":500,"purchase":{"quantity_mode":"single","recipient":{"provider":"telegram","modes":["self","username"]}}}'::jsonb,
+    'active', 4, now(), now(), 0, true,
+    'Telegram Stars 500', 'Stars 500'
+  ),
+  (
+    'stars_1000', 'Stars 1000',
+    '{"family":"telegram_stars","amount":1000,"purchase":{"quantity_mode":"single","recipient":{"provider":"telegram","modes":["self","username"]}}}'::jsonb,
+    'active', 5, now(), now(), 0, true,
+    'Telegram Stars 1000', 'Stars 1000'
+  ),
+  (
+    'stars_3000', 'Stars 3000',
+    '{"family":"telegram_stars","amount":3000,"purchase":{"quantity_mode":"single","recipient":{"provider":"telegram","modes":["self","username"]}}}'::jsonb,
+    'active', 6, now(), now(), 0, true,
+    'Telegram Stars 3000', 'Stars 3000'
+  )
 ON CONFLICT (sku) DO UPDATE SET
   short_name = EXCLUDED.short_name,
-  metadata = EXCLUDED.metadata,
+  metadata = market.products.metadata || EXCLUDED.metadata,
   status = 'active',
-  position = 3,
+  position = EXCLUDED.position,
   marketable = true,
+  name = EXCLUDED.name,
+  button_label = EXCLUDED.button_label,
   updated_at = now(),
   version = market.products.version + 1;
-
-UPDATE market.products
-SET metadata = metadata || '{"purchase":{"quantity_mode":"single","recipient":{"provider":"telegram","modes":["self","username"],"eligibility":{"is_premium":false},"ineligible_code":"premium_already_active"}}}'::jsonb,
-    position = CASE sku WHEN 'premium_3m' THEN 1 WHEN 'premium_6m' THEN 2 ELSE position END,
-    status = 'active',
-    marketable = true,
-    updated_at = now(),
-    version = version + 1
-WHERE sku IN ('premium_3m', 'premium_6m');
-
-UPDATE market.products
-SET metadata = metadata || '{"purchase":{"quantity_mode":"single","recipient":{"provider":"telegram","modes":["self","username"]}}}'::jsonb,
-    position = CASE sku
-      WHEN 'stars_500' THEN 4
-      WHEN 'stars_1000' THEN 5
-      WHEN 'stars_3000' THEN 6
-      ELSE position
-    END,
-    status = 'active',
-    marketable = true,
-    updated_at = now(),
-    version = version + 1
-WHERE sku IN ('stars_500', 'stars_1000', 'stars_3000');
 
 -- The old 12-month SKU and crypto assets stay as historical catalog records,
 -- but cannot appear in the buyer market or accept new broker supply.

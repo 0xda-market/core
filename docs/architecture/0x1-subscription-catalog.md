@@ -1,8 +1,8 @@
 # 0x1 Special and Exclusive subscription catalog
 
 0xda-market registers **eight separate digital subscription SKUs** for an
-authenticated **0x1 Bond**, not for a Telegram account, device, Avaia, or
-BondChain. They are not Telegram Premium resales.
+authenticated **0x1 Bond**, not for a third-party messaging account, device, Avaia, or
+BondChain. They are not third-party subscription resales.
 
 | Duration | Special (USDT) | Special (Seeds ₴€£) | Exclusive (USDT) |
 | --- | ---: | ---: | ---: |

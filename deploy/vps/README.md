@@ -4,6 +4,21 @@ This directory deploys the provider-agnostic `0xda-market` application workloads
 
 The public edge is not part of this product deployment. Caddy, TLS state, public ports `80/443`, host/path routing, and the external `nilx-edge` network contract are owned by [`0x0sky/infra`](https://github.com/0x0sky/infra).
 
+## Database boundary
+
+Development (0xda-market TEST) uses Supabase PostgreSQL. Production uses the
+self-hosted `market-postgres-production` database on edge-prod-1, reachable
+over the internal `nilx-edge` network on port 1927.
+
+Production `DATABASE_URL` must identify host `market-postgres-production`,
+user `market`, database `market`, and port `1927`. The production
+container validates the target before running any database migrations.
+Keep TEST and production data, users, credentials, and backup sets separate.
+
+Production must not be activated before an off-host database backup and
+isolated restore have been verified. The infrastructure contract is managed
+by `aiaiaiai-org/infra`; no database port is exposed publicly.
+
 ## Runtime identities
 
 Development and production are independent Compose projects and may stay online at the same time:

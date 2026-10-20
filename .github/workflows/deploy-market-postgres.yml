@@ -1,0 +1,72 @@
+name: Deploy Market PostgreSQL
+
+on:
+  workflow_dispatch:
+    inputs:
+      recovery_ready:
+        description: Type RECOVERY_READY after verifying isolated restore and off-host backup procedure
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: market-production-postgres
+  cancel-in-progress: false
+
+jobs:
+  request:
+    name: Request production DB activation through infra
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+    steps:
+      - name: Enforce manual recovery gate
+        env:
+          RECOVERY_READY: ${{ inputs.recovery_ready }}
+        run: |
+          test "$RECOVERY_READY" = RECOVERY_READY || {
+            echo "::error::Recovery procedure and off-host backup must be verified before activation."
+            exit 1
+          }
+
+      - name: Encrypt scoped DB secret and request infra deployment
+        env:
+          INFRA_AGE_RECIPIENT: ${{ vars.INFRA_AGE_RECIPIENT }}
+          MARKET_POSTGRES_PASSWORD: ${{ secrets.MARKET_POSTGRES_PASSWORD }}
+          GH_TOKEN: ${{ secrets.INFRA_DEPLOY_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test -n "$GH_TOKEN" || { echo "::error::Missing INFRA_DEPLOY_TOKEN in production."; exit 1; }
+          test -n "$INFRA_AGE_RECIPIENT" || { echo "::error::Missing INFRA_AGE_RECIPIENT in production."; exit 1; }
+          test -n "$MARKET_POSTGRES_PASSWORD" || { echo "::error::Missing MARKET_POSTGRES_PASSWORD in production."; exit 1; }
+          [[ "$MARKET_POSTGRES_PASSWORD" != *$'\n'* && "$MARKET_POSTGRES_PASSWORD" != *$'\r'* ]] || {
+            echo "::error::Database secret may not contain newlines."
+            exit 1
+          }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq age
+
+          source_file="$RUNNER_TEMP/market-postgres-source.env"
+          encrypted_file="$RUNNER_TEMP/market-postgres-secrets.age"
+          trap 'rm -f "$source_file" "$encrypted_file"' EXIT
+
+          printf 'MARKET_POSTGRES_PASSWORD=%s\n' "$MARKET_POSTGRES_PASSWORD" > "$source_file"
+          age --armor --recipient "$INFRA_AGE_RECIPIENT" --output "$encrypted_file" "$source_file"
+          rm -f "$source_file"
+
+          jq -n --arg workload "market-postgres-production" \
+            --rawfile secrets_age "$encrypted_file" \
+            '{event_type: "deploy-workload", client_payload: {workload: $workload, secrets_age: $secrets_age}}' |
+            gh api --method POST repos/aiaiaiai-org/infra/dispatches --input -
+
+          {
+            echo "### Market production PostgreSQL"
+            echo
+            echo "Encrypted, scoped deployment request submitted to aiaiaiai-org/infra."
+            echo "Check the resulting Deploy workload run for target edge-prod-1 and activation status."
+            echo "This step does not confirm database health, backups, or application readiness."
+          } >> "$GITHUB_STEP_SUMMARY"

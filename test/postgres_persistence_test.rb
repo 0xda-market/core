@@ -97,6 +97,7 @@ class PostgresPersistenceTest < Minitest::Test
         015_localization_matrix 016_settlements 017_broker_earnings
         018_catalog_recipient_contract 019_broker_payout_guards
         020_0x1_subscription_catalog
+        021_normalize_0x1_seeds_identifier
       ],
       versions
     )

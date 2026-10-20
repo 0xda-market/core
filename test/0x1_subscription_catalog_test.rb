@@ -50,10 +50,10 @@ class Ox1SubscriptionCatalogTest < Minitest::Test
         assert_equal ["self"], product.metadata.dig("purchase", "recipient", "modes"), sku
 
         modes = product.metadata.fetch("payment_modes")
-        assert_equal(seeds ? %w[USDT SEED] : %w[USDT], modes, sku)
+        assert_equal(seeds ? %w[USDT seeds] : %w[USDT], modes, sku)
         if seeds
           assert_equal(
-            { "amount" => seeds, "currency" => "SEED", "symbol" => "₴€£" },
+            { "amount" => seeds, "currency" => "seeds", "symbol" => "₴€£" },
             product.metadata.fetch("seed_price"), sku
           )
         else

@@ -99,6 +99,7 @@ class PostgresPersistenceTest < Minitest::Test
         020_0x1_subscription_catalog
         021_normalize_0x1_seeds_identifier
         022_issuer_denominations
+        023_issuer_orders
       ],
       versions
     )

@@ -105,6 +105,13 @@ module ZeroXDA
                available?(:admin_denomination_prices)
               return route(:denomination_price_history)
             end
+            if available?(:issuer_orders)
+              return route(:create_issuer_order) if method == "POST" && path == "/v1/issuer-orders"
+              if (match = path.match(%r{\A/v1/issuer-orders/([^/]+)(/cancel)?\z}))
+                return route(:find_issuer_order, id: match[1]) if method == "GET" && match[2].nil?
+                return route(:cancel_issuer_order, id: match[1]) if method == "POST" && match[2]
+              end
+            end
             return route(:create_intent) if method == "POST" && path == "/v1/intents"
 
             if method == "GET" && (match = path.match(%r{\A/v1/intents/([^/]+)\z}))

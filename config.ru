@@ -28,6 +28,10 @@ require_relative "lib/zero_x_da/market/pricing/service"
 require_relative "lib/zero_x_da/market/denominations/memory_store"
 require_relative "lib/zero_x_da/market/denominations/postgres_store"
 require_relative "lib/zero_x_da/market/denominations/service"
+require_relative "lib/zero_x_da/market/issuer_orders/memory_store"
+require_relative "lib/zero_x_da/market/issuer_orders/postgres_store"
+require_relative "lib/zero_x_da/market/issuer_orders/service"
+require_relative "lib/zero_x_da/market/transport/issuer_api"
 require_relative "lib/zero_x_da/market/localization/service"
 require_relative "lib/zero_x_da/market/listings/memory_store"
 require_relative "lib/zero_x_da/market/listings/postgres_store"
@@ -54,6 +58,11 @@ operator_token = ENV["MANUAL_PROVIDER_TOKEN"]
 database_url = ENV["DATABASE_URL"]
 mock_payment_enabled = ENV.fetch("ENABLE_MOCK_PAYMENT_PROVIDER", "0") == "1"
 mock_payment_token = ENV["MOCK_PAYMENT_PROVIDER_TOKEN"]
+issuer_api_token = ENV["ISSUER_API_TOKEN"].to_s
+issuer_api_issuer = ENV["ISSUER_API_ISSUER"].to_s
+if issuer_api_token.empty? != issuer_api_issuer.empty?
+  raise "ISSUER_API_TOKEN and ISSUER_API_ISSUER must be configured together"
+end
 market_payment_provider = ENV["MARKET_PAYMENT_PROVIDER"].to_s.strip
 manual_quote_ttl = Integer(ENV.fetch("MANUAL_QUOTE_TTL_SECONDS", "900"))
 raise "MANUAL_QUOTE_TTL_SECONDS must be positive" unless manual_quote_ttl.positive?
@@ -89,6 +98,9 @@ pricing_store = database ? ZeroXDA::Market::Pricing::PostgresStore.new(database:
 pricing = ZeroXDA::Market::Pricing::Service.new(store: pricing_store, catalog: catalog, clock: clock)
 denomination_store = database ? ZeroXDA::Market::Denominations::PostgresStore.new(database: database) : ZeroXDA::Market::Denominations::MemoryStore.new
 denominations = ZeroXDA::Market::Denominations::Service.new(store: denomination_store, catalog: catalog, clock: clock)
+issuer_order_store = database ? ZeroXDA::Market::IssuerOrders::PostgresStore.new(database: database) : ZeroXDA::Market::IssuerOrders::MemoryStore.new
+issuer_orders = ZeroXDA::Market::IssuerOrders::Service.new(store: issuer_order_store, denominations: denominations,
+                                                           users: identity_store, clock: clock)
 localization = ZeroXDA::Market::Localization::Service.new(catalog: catalog, clock: clock,
                                                           max_rate_age_seconds: Integer(ENV.fetch("FX_RATE_MAX_AGE_SECONDS", "3600")))
 manual_provider = if operator_token && !operator_token.empty?
@@ -133,7 +145,8 @@ public_api = ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, token: publ
                                                      identity_service: identity_service, admin_service: admin_service,
                                                      catalog: catalog, pricing: pricing, localization: localization,
                                                      listings: listings, marketplace: marketplace, broker_orders: broker_orders,
-                                                     broker_earnings: broker_earnings, denominations: denominations)
+                                                     broker_earnings: broker_earnings, denominations: denominations,
+                                                     issuer_orders: issuer_orders)
 applications = { "/" => public_api }
 operator_api = nil
 if manual_provider
@@ -150,5 +163,9 @@ if mock_payment_enabled
                                                                       clock: clock, id_generator: SecureRandom.method(:uuid))
   applications["/mock-payments"] = ZeroXDA::Market::Transport::MockPaymentAPI.new(provider: mock_payment_provider,
                                                                                    token: mock_payment_token)
+end
+unless issuer_api_token.empty?
+  applications["/issuer"] = ZeroXDA::Market::Transport::IssuerAPI.new(issuer_orders: issuer_orders, issuer: issuer_api_issuer,
+                                                                       token: issuer_api_token)
 end
 run Rack::URLMap.new(applications)

@@ -101,6 +101,39 @@ class RuntimeTest < Minitest::Test
     end
   end
 
+  def test_mounts_the_issuer_api_only_with_its_own_token_and_issuer
+    with_environment(
+      "DEPLOY_ENV" => "development", "PUBLIC_API_TOKEN" => "client-secret", "MANUAL_PROVIDER_TOKEN" => nil,
+      "DATABASE_URL" => nil, "ISSUER_API_TOKEN" => "issuer-secret", "ISSUER_API_ISSUER" => "issuer.example"
+    ) do
+      client = Rack::MockRequest.new(Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)))
+
+      assert_equal 401, client.get("/issuer/v1/orders").status
+      assert_equal 401, client.get("/issuer/v1/orders", "HTTP_AUTHORIZATION" => "Bearer client-secret").status
+      queue = client.get("/issuer/v1/orders", "HTTP_AUTHORIZATION" => "Bearer issuer-secret")
+      assert_equal 200, queue.status
+      assert_equal "issuer.example", JSON.parse(queue.body).dig("meta", "issuer")
+    end
+
+    with_environment(
+      "DEPLOY_ENV" => "development", "PUBLIC_API_TOKEN" => "client-secret", "MANUAL_PROVIDER_TOKEN" => nil,
+      "DATABASE_URL" => nil, "ISSUER_API_TOKEN" => nil, "ISSUER_API_ISSUER" => nil
+    ) do
+      client = Rack::MockRequest.new(Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)))
+      assert_equal 401, client.get("/issuer/v1/orders", "HTTP_AUTHORIZATION" => "Bearer issuer-secret").status
+    end
+  end
+
+  def test_rejects_a_half_configured_issuer_api
+    with_environment(
+      "DEPLOY_ENV" => "development", "PUBLIC_API_TOKEN" => "client-secret", "MANUAL_PROVIDER_TOKEN" => nil,
+      "DATABASE_URL" => nil, "ISSUER_API_TOKEN" => "issuer-secret", "ISSUER_API_ISSUER" => nil
+    ) do
+      error = assert_raises(RuntimeError) { Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)) }
+      assert_includes error.message, "ISSUER_API_ISSUER"
+    end
+  end
+
   def test_rejects_a_runtime_without_a_positive_marketplace_margin
     with_environment(
       "DEPLOY_ENV" => "development",

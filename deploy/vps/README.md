@@ -16,9 +16,9 @@ user `market`, database `market`, and port `1927`, with no query string or
 process (API, migrations, `fx-refresh`, `price-refresh`) validates the target
 in `PostgresDatabase` before connecting.
 
-Environments map to branches: TEST deploys from `master`; RELEASE
-(production) activation runs only from a release branch (`release` or
-`release-X.Y`).
+TEST builds come from `master`; RELEASE (production) comes from release
+branches. The `Deploy Market PostgreSQL` activation therefore runs only from
+a release branch (`release` or `release-X.Y`).
 Keep TEST and production data, users, credentials, and backup sets separate.
 
 Production must not be activated before an off-host database backup and

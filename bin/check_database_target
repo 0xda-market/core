@@ -1,0 +1,15 @@
+# frozen_string_literal: true
+
+require_relative "../lib/zero_x_da/market/adapters/database_target"
+
+target = ZeroXDA::Market::Adapters::DatabaseTarget
+
+begin
+  target.verify!(ENV.fetch("DATABASE_URL", ""))
+rescue target::InvalidTarget => error
+  abort error.message
+end
+
+if ENV.fetch("DEPLOY_ENV", "development") == "production"
+  puts "Production database target verified: #{target::PRODUCTION_LABEL}"
+end

@@ -127,18 +127,27 @@ must not accumulate unbounded application log files.
 
 ## Backups
 
-### PostgreSQL / Supabase
+### PostgreSQL
 
-The application database is external to the VPS. Container and release backups
-do not protect database state.
+**Development / TEST** connects to Supabase PostgreSQL. **Production / release**
+connects exclusively to the self-hosted `market-postgres-production` workload
+on `edge-prod-1` at `market-postgres-production:1927`, database `market`.
+A production Core container fails before migrations if its database URL targets
+Supabase or any other database. Do not share TEST and production credentials.
 
-Before a production schema change:
+The production PostgreSQL Docker volume is persistent but **not a backup**.
+Before initial production use or any database schema change:
 
-1. verify that the production PostgreSQL/Supabase backup policy is active;
-2. record the latest successful backup or point-in-time recovery boundary;
-3. keep the migration and the compatible application pair in Git;
-4. perform destructive restore testing only in a non-production project;
-5. do not assume an application rollback reverses a database migration.
+1. Confirm whether any existing production data or volume needs preservation.
+2. Verify the production major version and migrations in an isolated database.
+3. Configure encrypted, off-host PostgreSQL backups and prove a restore into
+   a non-production database. The separate Prism backup does not cover Market.
+4. Record the last verified backup and recovery procedure.
+5. Apply migrations only after validating rollback compatibility of the Core
+   and Telegram Bot release pair. Container rollback never reverses migrations.
+
+Do not publish PostgreSQL port 1927 through Caddy, Docker host port mappings,
+or a public tunnel. The application connects over `nilx-edge` only.
 
 ### VPS runtime state
 

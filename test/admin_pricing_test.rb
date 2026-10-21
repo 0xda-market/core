@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
+require "delegate"
 require "json"
 require "rack/mock"
 require "zero_x_da/market/catalog/memory_store"
@@ -57,18 +58,39 @@ class AdminPricingTest < Minitest::Test
     )
     admin_service.bootstrap(user_id: @administrator.id)
 
-    provider = TestProvider.new(clock: @clock)
-    kernel, = build_kernel(provider: provider, clock: @clock)
-    @client = Rack::MockRequest.new(
-      ZeroXDA::Market::Transport::JSONAPI.new(
-        kernel: kernel,
-        identity_service: identity_service,
-        admin_service: admin_service,
-        catalog: catalog,
-        pricing: @pricing
-      )
+    @client = build_client(
+      identity_service: identity_service, admin_service: admin_service, catalog: catalog, pricing: @pricing
     )
+    @build_client = lambda do |pricing|
+      build_client(identity_service: identity_service, admin_service: admin_service, catalog: catalog, pricing: pricing)
+    end
     @ordinary_user = ordinary_user
+  end
+
+  # Simulates a price refresh committing right after the admin batch.
+  class ConcurrentWriterPricing < SimpleDelegator
+    def apply_prices(*arguments, **options)
+      applied = __getobj__.apply_prices(*arguments, **options)
+      __getobj__.apply_prices(
+        [{ "sku" => "premium_3m", "amount_usdt" => "13.00" }],
+        source: "core", expected_revision: __getobj__.current_revision
+      )
+      applied
+    end
+  end
+
+  def test_reports_the_revision_the_batch_produced_not_a_later_one
+    @client = @build_client.call(ConcurrentWriterPricing.new(@pricing))
+    applied = request_json(
+      "/v1/admin/prices",
+      actor_user_id: @administrator.id,
+      revision: 0,
+      prices: [{ sku: "premium_3m", amount_usdt: "12.50" }]
+    )
+
+    assert_equal 201, applied.status, applied.body
+    assert_equal 1, JSON.parse(applied.body).dig("meta", "revision")
+    assert_equal 2, @pricing.current_revision
   end
 
   def test_applies_one_revisioned_batch_and_exposes_append_only_history
@@ -128,6 +150,19 @@ class AdminPricingTest < Minitest::Test
   end
 
   private
+
+  def build_client(identity_service:, admin_service:, catalog:, pricing:)
+    kernel, = build_kernel(provider: TestProvider.new(clock: @clock), clock: @clock)
+    Rack::MockRequest.new(
+      ZeroXDA::Market::Transport::JSONAPI.new(
+        kernel: kernel,
+        identity_service: identity_service,
+        admin_service: admin_service,
+        catalog: catalog,
+        pricing: pricing
+      )
+    )
+  end
 
   def request_json(path, document)
     @client.post(

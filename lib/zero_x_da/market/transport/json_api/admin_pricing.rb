@@ -49,7 +49,9 @@ module ZeroXDA
                 "data" => applied.map { |price| present_price(price) },
                 "meta" => {
                   "count" => applied.length,
-                  "revision" => @pricing.current_revision,
+                  # The revision this batch produced, not one a concurrent
+                  # writer may have advanced it to since.
+                  "revision" => applied.last.id,
                   "applied_at" => timestamp(applied.first&.created_at)
                 }
               }

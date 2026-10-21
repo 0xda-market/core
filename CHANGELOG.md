@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Execution-aware client pricing and a locked pre-order profitability gate that
   prevents marketplace reservations below the configured net margin.
 
+### Fixed
+
+- `POST /v1/admin/prices` reports the revision its own batch produced instead of
+  re-reading it after commit, where a concurrent price refresh could advance it
+  and let the next admin write skip the stale-revision check.
+
 ## [0.1.0] - 2026-07-19
 
 ### Added

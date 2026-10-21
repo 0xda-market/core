@@ -25,7 +25,8 @@ CREATE TABLE market.denomination_product_families (
 );
 
 -- amount_minor is an integer count of the denomination's smallest unit
--- (10^-scale). The current price is the latest row per (sku, denomination).
+-- (10^-scale). The current price is the last appended row (highest id) per
+-- (sku, denomination); timestamps are descriptive, not an ordering key.
 CREATE TABLE market.denomination_prices (
   id bigserial PRIMARY KEY,
   sku text NOT NULL REFERENCES market.products(sku),
@@ -38,7 +39,7 @@ CREATE TABLE market.denomination_prices (
 );
 
 CREATE INDEX denomination_prices_current_index
-  ON market.denomination_prices(denomination, sku, created_at DESC, id DESC);
+  ON market.denomination_prices(denomination, sku, id DESC);
 
 -- A price row is accepted only for a marketable product whose family is
 -- eligible for the denomination and whose metadata.payment_modes declares it.

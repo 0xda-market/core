@@ -50,8 +50,11 @@ non-game goods cannot be priced in seeds.
 Fractional input is rejected, never rounded.
 
 The history is append-only, enforced by a trigger. The current price is the
-latest row per `(sku, denomination)`. Writes use a revision lock, like USDT
-pricing, so a stale or partially ineligible batch appends nothing.
+last appended row (highest `id`) per `(sku, denomination)`, regardless of
+clock skew or timestamp precision. An administrator must supply the current
+`revision` when writing via HTTP; missing or stale revisions cannot silently
+overwrite a newer batch. Duplicate SKUs within a batch are rejected, and a
+stale or partially ineligible batch appends nothing.
 
 Migration `022_issuer_denominations.sql` registers `seeds` and copies the
 staged Special `metadata.seed_price` amounts into the history with source

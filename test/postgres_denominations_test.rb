@@ -95,6 +95,22 @@ class PostgresDenominationsTest < Minitest::Test
     end
   end
 
+  def test_last_append_wins_even_when_timestamps_go_backwards
+    @connection.transaction(rollback: :always) do
+      prices = [Time.utc(2030, 1, 1), Time.utc(2020, 1, 1)].each_with_index.map do |at, index|
+        ZeroXDA::Market::Denominations::Price.new(
+          sku: "0x1_special_1m", denomination: "seeds", amount_minor: 800 - index * 100,
+          source: "admin", created_at: at
+        )
+      end
+      first = @store.append_prices([prices.first], expected_revision: @store.revision).first
+      second = @store.append_prices([prices.last], expected_revision: @store.revision).first
+      assert_operator second.id, :>, first.id
+      assert_equal second.id, @store.latest_prices(denomination: "seeds").fetch("0x1_special_1m").id
+      assert_equal second.id, @store.history(limit: 1).first.id
+    end
+  end
+
   def test_store_appends_and_reads_the_latest_price
     @connection.transaction(rollback: :always) do
       revision = @store.revision

@@ -49,14 +49,14 @@ module ZeroXDA
           rows = @prices
             .where(denomination: denomination)
             .distinct(:sku)
-            .order(:sku, Sequel.desc(:created_at), Sequel.desc(:id))
+            .order(:sku, Sequel.desc(:id))
             .all
           rows.to_h { |row| [row.fetch(:sku), deserialize_price(row)] }
         end
 
         def history(limit:)
           @prices
-            .order(Sequel.desc(:created_at), Sequel.desc(:id))
+            .order(Sequel.desc(:id))
             .limit(limit)
             .all
             .map { |row| deserialize_price(row) }

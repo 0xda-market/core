@@ -60,7 +60,7 @@ module ZeroXDA
               denomination: denomination.code,
               source: "admin",
               set_by_user_id: actor_user.id,
-              expected_revision: body.fetch("revision", @denominations.current_revision)
+              expected_revision: body.fetch("revision")
             )
             json_response(
               201,

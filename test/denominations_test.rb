@@ -123,6 +123,17 @@ class DenominationsTest < Minitest::Test
     assert_equal [["game_special", 380]], entries.map { |entry| [entry[:product].sku, entry[:price].amount_minor] }
   end
 
+  def test_duplicate_skus_are_rejected_without_appending
+    error = assert_raises(ArgumentError) do
+      @service.apply_prices(
+        [{ "sku" => "game_special", "amount_minor" => 400 }, { "sku" => "game_special", "amount_minor" => 350 }],
+        denomination: "seeds"
+      )
+    end
+    assert_match(/duplicate sku/, error.message)
+    assert_equal 0, @service.current_revision
+  end
+
   def test_stale_revision_is_a_conflict
     @service.apply_prices([{ "sku" => "game_special", "amount_minor" => 400 }], denomination: "seeds")
     assert_raises(ZeroXDA::Market::Core::ConcurrencyConflict) do
@@ -168,7 +179,7 @@ class DenominationsTest < Minitest::Test
 
     ineligible = request_json(
       "/v1/admin/denomination-prices",
-      actor_user_id: @administrator.id, denomination: "seeds",
+      actor_user_id: @administrator.id, denomination: "seeds", revision: 1,
       prices: [{ sku: "gift_card", amount_minor: 10 }]
     )
     assert_equal 422, ineligible.status
@@ -180,10 +191,21 @@ class DenominationsTest < Minitest::Test
                  history.fetch("data").map { |row| [row["id"], row["type"], row.dig("attributes", "amount")] }
   end
 
+  def test_admin_api_requires_an_explicit_revision
+    rejected = request_json(
+      "/v1/admin/denomination-prices",
+      actor_user_id: @administrator.id, denomination: "seeds",
+      prices: [{ sku: "game_special", amount_minor: 400 }]
+    )
+    assert_equal 400, rejected.status
+    assert_equal "revision", JSON.parse(rejected.body).dig("errors", 0, "details", "field")
+    assert_equal 0, @service.current_revision
+  end
+
   def test_admin_api_rejects_non_administrators
     denied = request_json(
       "/v1/admin/denomination-prices",
-      actor_user_id: @ordinary_user.id, denomination: "seeds",
+      actor_user_id: @ordinary_user.id, denomination: "seeds", revision: 0,
       prices: [{ sku: "game_special", amount_minor: 400 }]
     )
     assert_equal 403, denied.status

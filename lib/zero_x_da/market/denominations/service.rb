@@ -48,11 +48,15 @@ module ZeroXDA
 
           resolved = find_denomination(denomination)
           now = current_time
+          seen_skus = {}
           prices = entries.map do |entry|
             raise ArgumentError, "price entry must be an object" unless entry.respond_to?(:to_h)
 
             entry = entry.to_h.transform_keys(&:to_s)
             product = @catalog.find_product(entry.fetch("sku"))
+            raise ArgumentError, "duplicate sku in price batch: #{product.sku}" if seen_skus[product.sku]
+
+            seen_skus[product.sku] = true
             unless resolved.accepts?(product)
               raise ArgumentError, "product #{product.sku} is not eligible for denomination #{resolved.code}"
             end

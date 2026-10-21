@@ -105,14 +105,20 @@ INSERT INTO market.denomination_product_families (denomination, family)
 VALUES ('seeds', '0x1_subscription');
 
 -- Carry the staged seed prices from catalog metadata into the price history.
--- Metadata is read, not modified; a product without a whole positive amount
--- is skipped rather than guessed.
+-- Metadata is read, not modified; a product without a whole positive amount,
+-- or one the eligibility trigger would reject, is skipped rather than guessed
+-- so a drifted catalog cannot abort the migration.
 INSERT INTO market.denomination_prices (sku, denomination, amount_minor, source)
 SELECT p.sku, 'seeds', (p.metadata #>> '{seed_price,amount}')::bigint, 'core'
   FROM market.products AS p
- WHERE p.metadata #>> '{seed_price,currency}' = 'seeds'
+  JOIN market.denomination_product_families AS f
+    ON f.denomination = 'seeds'
+   AND f.family = p.metadata ->> 'family'
+ WHERE p.marketable
+   AND p.metadata #>> '{seed_price,currency}' = 'seeds'
    AND jsonb_typeof(p.metadata #> '{seed_price,amount}') = 'number'
    AND (p.metadata #>> '{seed_price,amount}') ~ '^[1-9][0-9]{0,11}$'
+   AND jsonb_typeof(p.metadata -> 'payment_modes') = 'array'
    AND p.metadata -> 'payment_modes' ? 'seeds'
    AND NOT EXISTS (
      SELECT 1

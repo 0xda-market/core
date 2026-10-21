@@ -56,6 +56,30 @@ class PostgresDenominationsTest < Minitest::Test
     end
   end
 
+  def test_backfill_skips_drifted_goods_instead_of_aborting
+    backfill = File.read(File.expand_path("../db/migrations/022_issuer_denominations.sql", __dir__), encoding: "UTF-8")
+      .split(/^(?=INSERT INTO market\.denomination_prices )/).last
+    products = @connection[Sequel.qualify(:market, :products)]
+    seeded = { "seed_price" => { "amount" => 10, "currency" => "seeds" }, "payment_modes" => ["seeds"] }
+    @connection.transaction(rollback: :always) do
+      position = products.max(:position).to_i
+      [
+        ["drift_unmarketable", false, "0x1_subscription"],
+        ["drift_other_family", true, "other"]
+      ].each_with_index do |(sku, marketable, family), index|
+        products.insert(
+          sku: sku, short_name: sku, position: position + index + 1, marketable: marketable,
+          metadata: Sequel.pg_jsonb(seeded.merge("family" => family))
+        )
+      end
+
+      @connection.run(backfill)
+
+      assert_empty @connection[Sequel.qualify(:market, :denomination_prices)]
+        .where(sku: %w[drift_unmarketable drift_other_family]).all
+    end
+  end
+
   def test_staged_products_have_no_public_seed_prices
     assert_empty @service.current_prices(denomination: "seeds").fetch(:entries)
   end

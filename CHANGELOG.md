@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Execution-aware client pricing and a locked pre-order profitability gate that
   prevents marketplace reservations below the configured net margin.
+- Issuer denominations: a non-fiat registry with `seeds` (₴€£) as the first
+  entry, an append-only price history limited to eligible game goods, and
+  read/admin JSON routes. The registry stays outside FX and balances.
 
 ## [0.1.0] - 2026-07-19
 

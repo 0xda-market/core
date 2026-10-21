@@ -11,8 +11,14 @@ self-hosted `market-postgres-production` database on edge-prod-1, reachable
 over the internal `nilx-edge` network on port 1927.
 
 Production `DATABASE_URL` must identify host `market-postgres-production`,
-user `market`, database `market`, and port `1927`. The production
-container validates the target before running any database migrations.
+user `market`, database `market`, and port `1927`, with no query string or
+`#` suffix (Sequel would let them override the target). Every production
+process (API, migrations, `fx-refresh`, `price-refresh`) validates the target
+in `PostgresDatabase` before connecting.
+
+Environments map to branches: TEST deploys from `master`; RELEASE
+(production) activation runs only from a release branch (`release` or
+`release-X.Y`).
 Keep TEST and production data, users, credentials, and backup sets separate.
 
 Production must not be activated before an off-host database backup and

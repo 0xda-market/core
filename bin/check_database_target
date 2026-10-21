@@ -1,28 +1,15 @@
 # frozen_string_literal: true
 
-require "uri"
+require_relative "../lib/zero_x_da/market/adapters/database_target"
 
-environment = ENV.fetch("DEPLOY_ENV", "development")
-abort "unsupported deployment environment" unless %w[development production].include?(environment)
+target = ZeroXDA::Market::Adapters::DatabaseTarget
 
-# Production has its own self-hosted database on edge-prod-1.
-# A misconfigured Supabase/Test URL must never run production migrations.
-if environment == "production"
-  raw_url = ENV.fetch("DATABASE_URL", "")
-  abort "production DATABASE_URL is required" if raw_url.empty?
+begin
+  target.verify!(ENV.fetch("DATABASE_URL", ""))
+rescue target::InvalidTarget => error
+  abort error.message
+end
 
-  begin
-    uri = URI.parse(raw_url)
-    valid = %w[postgres postgresql].include?(uri.scheme) &&
-            uri.host == "market-postgres-production" &&
-            uri.port == 1927 &&
-            uri.path == "/market" &&
-            uri.user == "market" &&
-            !uri.password.to_s.empty?
-  rescue URI::InvalidURIError, URI::InvalidComponentError
-    valid = false
-  end
-
-  abort "production DATABASE_URL must target the self-hosted market-postgres-production:1927/market" unless valid
-  puts "Production database target verified: market-postgres-production:1927/market"
+if ENV.fetch("DEPLOY_ENV", "development") == "production"
+  puts "Production database target verified: #{target::PRODUCTION_LABEL}"
 end

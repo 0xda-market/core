@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "sequel"
+require_relative "database_target"
 
 module ZeroXDA
   module Market
@@ -8,7 +9,9 @@ module ZeroXDA
       class PostgresDatabase
         attr_reader :connection
 
-        def initialize(url:, max_connections: 5)
+        def initialize(url:, max_connections: 5, environment: ENV.fetch("DEPLOY_ENV", "development"))
+          # Every process (API, migrations, FX and pricing workers) connects here.
+          DatabaseTarget.verify!(url, environment: environment)
           @connection = Sequel.connect(
             url,
             max_connections: max_connections,

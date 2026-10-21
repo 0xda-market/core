@@ -40,4 +40,27 @@ class MarketPostgresDeployWorkflowTest < Minitest::Test
     assert_includes @steps.fetch(recipient_step).fetch("run"), "ssh-keygen -lf"
     assert_includes @steps.fetch(recipient_step).fetch("run"), '.head_branch == "master"'
   end
+
+  def test_production_activation_requires_a_release_branch_before_secrets
+    gate = @steps.index { |step| step["name"] == "Require a release branch" }
+    secret_steps = @steps.each_index.select { |index| @steps.fetch(index).to_s.include?("secrets.") }
+
+    assert_equal 0, gate
+    assert secret_steps.all? { |index| index > gate }
+
+    script = @steps.fetch(gate).fetch("run")
+    %w[refs/heads/release refs/heads/release-0.2 refs/heads/release-1.10].each do |ref|
+      assert run_gate(script, ref).success?, ref
+    end
+    %w[refs/heads/master refs/heads/feature/x refs/heads/release-request/v0.1.0
+       refs/heads/release-0.2-hotfix refs/tags/v0.2.0 refs/heads/releases].each do |ref|
+      refute run_gate(script, ref).success?, ref
+    end
+  end
+
+  private
+
+  def run_gate(script, ref)
+    Open3.capture3({ "WORKFLOW_REF" => ref }, "bash", "-c", script).last
+  end
 end

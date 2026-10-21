@@ -8,8 +8,8 @@ class DatabaseTargetTest < Minitest::Test
   TARGET_CHECK = File.expand_path("../bin/check_database_target", __dir__)
   SELF_HOSTED_URL = "postgresql://market:example-test-password@market-postgres-production:1927/market"
 
-  def run_check(environment:, url: nil)
-    variables = { "DEPLOY_ENV" => environment, "DATABASE_URL" => url }
+  def run_check(environment:, url: nil, extra: {})
+    variables = { "DEPLOY_ENV" => environment, "DATABASE_URL" => url }.merge(extra)
     Open3.capture3(variables, RbConfig.ruby, TARGET_CHECK)
   end
 
@@ -62,5 +62,35 @@ class DatabaseTargetTest < Minitest::Test
       refute status.success?
       refute_includes stdout + stderr, "leakme"
     end
+  end
+
+  # Sequel 5 lets query parameters override the URI authority and path.
+  def test_production_rejects_query_and_fragment_overrides
+    ["#{SELF_HOSTED_URL}?host=db.example.supabase.co",
+     "#{SELF_HOSTED_URL}?port=5432",
+     "#{SELF_HOSTED_URL}?database=postgres",
+     "#{SELF_HOSTED_URL}?user=postgres",
+     "#{SELF_HOSTED_URL}?conn_str=host%3Ddb.example.supabase.co",
+     "#{SELF_HOSTED_URL}?",
+     "#{SELF_HOSTED_URL}#fragment"].each do |url|
+      stdout, stderr, status = run_check(environment: "production", url: url)
+      refute status.success?, url
+      refute_includes stdout + stderr, "example-test-password"
+    end
+  end
+
+  def test_production_rejects_libpq_environment_overrides
+    %w[PGHOSTADDR PGSERVICE PGSERVICEFILE PGSYSCONFDIR].each do |name|
+      _stdout, stderr, status = run_check(environment: "production", url: SELF_HOSTED_URL, extra: { name => "x" })
+      refute status.success?, name
+      assert_includes stderr, name
+    end
+  end
+
+  def test_rejects_unsupported_environment
+    _stdout, stderr, status = run_check(environment: "staging", url: SELF_HOSTED_URL)
+
+    refute status.success?
+    assert_includes stderr, "unsupported deployment environment"
   end
 end

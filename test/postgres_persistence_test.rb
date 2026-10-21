@@ -98,6 +98,7 @@ class PostgresPersistenceTest < Minitest::Test
         018_catalog_recipient_contract 019_broker_payout_guards
         020_0x1_subscription_catalog
         021_normalize_0x1_seeds_identifier
+        022_issuer_denominations
       ],
       versions
     )

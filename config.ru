@@ -25,6 +25,9 @@ require_relative "lib/zero_x_da/market/pricing/memory_store"
 require_relative "lib/zero_x_da/market/pricing/postgres_store"
 require_relative "lib/zero_x_da/market/pricing/profitability_policy"
 require_relative "lib/zero_x_da/market/pricing/service"
+require_relative "lib/zero_x_da/market/denominations/memory_store"
+require_relative "lib/zero_x_da/market/denominations/postgres_store"
+require_relative "lib/zero_x_da/market/denominations/service"
 require_relative "lib/zero_x_da/market/localization/service"
 require_relative "lib/zero_x_da/market/listings/memory_store"
 require_relative "lib/zero_x_da/market/listings/postgres_store"
@@ -84,6 +87,8 @@ catalog_store = database ? ZeroXDA::Market::Catalog::PostgresStore.new(database:
 catalog = ZeroXDA::Market::Catalog::Service.new(store: catalog_store)
 pricing_store = database ? ZeroXDA::Market::Pricing::PostgresStore.new(database: database) : ZeroXDA::Market::Pricing::MemoryStore.new
 pricing = ZeroXDA::Market::Pricing::Service.new(store: pricing_store, catalog: catalog, clock: clock)
+denomination_store = database ? ZeroXDA::Market::Denominations::PostgresStore.new(database: database) : ZeroXDA::Market::Denominations::MemoryStore.new
+denominations = ZeroXDA::Market::Denominations::Service.new(store: denomination_store, catalog: catalog, clock: clock)
 localization = ZeroXDA::Market::Localization::Service.new(catalog: catalog, clock: clock,
                                                           max_rate_age_seconds: Integer(ENV.fetch("FX_RATE_MAX_AGE_SECONDS", "3600")))
 manual_provider = if operator_token && !operator_token.empty?
@@ -128,7 +133,7 @@ public_api = ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, token: publ
                                                      identity_service: identity_service, admin_service: admin_service,
                                                      catalog: catalog, pricing: pricing, localization: localization,
                                                      listings: listings, marketplace: marketplace, broker_orders: broker_orders,
-                                                     broker_earnings: broker_earnings)
+                                                     broker_earnings: broker_earnings, denominations: denominations)
 applications = { "/" => public_api }
 operator_api = nil
 if manual_provider

@@ -91,6 +91,20 @@ module ZeroXDA
             if method == "DELETE" && listing_match && available?(:broker_listings)
               return route(:withdraw_broker_listing, id: listing_match[1])
             end
+            if method == "GET" && path == "/v1/denominations" && available?(:denominations)
+              return route(:denominations)
+            end
+            if method == "GET" && (match = path.match(%r{\A/v1/denominations/([^/]+)/prices\z})) &&
+               available?(:denominations)
+              return route(:denomination_prices, code: match[1])
+            end
+            if method == "POST" && path == "/v1/admin/denomination-prices" && available?(:admin_denomination_prices)
+              return route(:apply_denomination_prices)
+            end
+            if method == "GET" && path == "/v1/admin/denomination-prices/history" &&
+               available?(:admin_denomination_prices)
+              return route(:denomination_price_history)
+            end
             return route(:create_intent) if method == "POST" && path == "/v1/intents"
 
             if method == "GET" && (match = path.match(%r{\A/v1/intents/([^/]+)\z}))

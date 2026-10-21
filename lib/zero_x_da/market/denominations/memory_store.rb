@@ -39,8 +39,8 @@ module ZeroXDA
           @mutex.synchronize { @revision }
         end
 
-        # Latest price per sku. Insertion order breaks created_at ties,
-        # matching the (created_at DESC, id DESC) ordering in Postgres.
+        # Latest price per sku: the last appended row wins, matching the
+        # id DESC ordering in Postgres; created_at is not an ordering key.
         def latest_prices(denomination:)
           @mutex.synchronize do
             @prices.each_with_object({}) do |price, selected|

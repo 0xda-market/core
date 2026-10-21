@@ -150,4 +150,17 @@ class PostgresDenominationsTest < Minitest::Test
       end
     end
   end
+
+  def test_store_maps_a_trigger_rejection_to_a_validation_error
+    @connection.transaction(rollback: :always) do
+      revision = @store.revision
+      price = ZeroXDA::Market::Denominations::Price.new(
+        sku: "0x1_exclusive_1m", denomination: "seeds", amount_minor: 100, source: "admin", created_at: Time.now.utc
+      )
+      @connection.transaction(rollback: :always, savepoint: true) do
+        assert_raises(ArgumentError) { @store.append_prices([price], expected_revision: revision) }
+      end
+      assert_equal revision, @store.revision
+    end
+  end
 end

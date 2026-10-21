@@ -39,6 +39,10 @@ module ZeroXDA
 
             prices.map { |price| persist(price) }
           end
+        rescue Sequel::CheckConstraintViolation
+          # The eligibility trigger re-checks each row under the lock, so a
+          # product changed after service validation is a validation error.
+          raise ArgumentError, "denomination price batch contains a product that is no longer eligible"
         end
 
         def revision

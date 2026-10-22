@@ -128,6 +128,11 @@ module ZeroXDA
         # A channel uses this to show the linked public handle, or to offer
         # signing in with the issuer to link one.
         def account_status(customer_user_id:, issuer:)
+          # An issuer-scoped lookup must not label a 0x1 binding as belonging
+          # to an arbitrary issuer supplied in the request path.
+          unless @denominations.denominations.any? { |denomination| denomination.issuer == issuer }
+            raise Core::NotFound.new("issuer", issuer)
+          end
           customer = active_customer(customer_user_id)
           links = customer_links(customer)
           return { linked: false, issuer: issuer } if links.empty?

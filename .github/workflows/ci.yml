@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
@@ -88,6 +90,8 @@ jobs:
           ruby -c bin/refresh_fx_rates
           ruby -c bin/refresh_fx_rates_loop
           bash -n bin/check_documented_repositories
+          bash -n scripts/dispatch-development-workload.sh
+          bash scripts/test-development-infra.sh
           bash -n deploy/vps/bootstrap-ubuntu.sh
           bash -n deploy/vps/deploy.sh
           bash -n deploy/vps/rollback.sh
@@ -107,6 +111,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --tag 0xda-market:test .
+      - name: Verify development worker process commands exist
+        run: |
+          docker run --rm 0xda-market:test ruby -c bin/refresh_fx_rates_loop
+          docker run --rm 0xda-market:test ruby -c bin/refresh_market_prices_loop
       - name: Validate product-only Compose ownership
         run: |
           cat >deploy/vps/.env <<'ENV'

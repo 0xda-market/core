@@ -1,231 +1,117 @@
-name: Deploy
+# © 2026 aiaiaiai · aiaiaiai.org
+name: Deploy development via infra
 
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: GitHub and VPS environment
-        required: true
-        default: development
-        type: choice
-        options:
-          - development
-          - production
-      production_tag:
-        description: Production tag (required only for production; ignored for development)
-        required: false
-        type: string
 
 permissions:
   contents: read
-  statuses: write
+  actions: read
+  packages: write
 
 concurrency:
-  group: vps-api-${{ inputs.environment }}
+  group: market-core-development-deploy
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  package:
+    name: Require master Full CI and publish immutable Core image
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment:
-      name: ${{ inputs.environment }}
-    env:
-      DEPLOY_ENV: ${{ inputs.environment }}
-      WORKFLOW_REF: ${{ github.ref }}
-      SELECTED_RELEASE_SHA: ${{ github.sha }}
-      PRODUCTION_TAG: ${{ inputs.production_tag || '' }}
-      SSH_HOST: ${{ secrets.SSH_HOST }}
-      SSH_USER: ${{ secrets.SSH_USER }}
-      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-      SSH_PORT: ${{ vars.SSH_PORT }}
-      SSH_DEPLOYMENT_PATH: ${{ vars.SSH_DEPLOYMENT_PATH }}
-      MCP_CONTROL_REF: 2f9766ea6993716d2d79ad91a4ce40f18baa44ef
-
+    timeout-minutes: 45
+    outputs:
+      image: ${{ steps.image.outputs.ref }}
     steps:
-      - name: Resolve deployment source
+      - name: Gate on successful exact-head master push CI
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          case "$DEPLOY_ENV" in development|production) ;; *) exit 1 ;; esac
-
-          if [[ "$DEPLOY_ENV" == production ]]; then
-            if [[ "$WORKFLOW_REF" != refs/heads/master ]]; then
-              echo "::error::Run the production workflow from master; select the release with Production tag"
-              exit 1
-            fi
-            if [[ -z "$PRODUCTION_TAG" ]]; then
-              echo "::error::Production tag is required for production deployment"
-              exit 1
-            fi
-            if ! git check-ref-format "refs/tags/$PRODUCTION_TAG"; then
-              echo "::error::Production tag is not a valid Git tag"
-              exit 1
-            fi
-            echo "RELEASE_REF=refs/tags/$PRODUCTION_TAG" >>"$GITHUB_ENV"
-          else
-            test -n "$SELECTED_RELEASE_SHA"
-            echo "RELEASE_REF=$SELECTED_RELEASE_SHA" >>"$GITHUB_ENV"
-          fi
+          test "$GITHUB_REF" = refs/heads/master || {
+            echo "::error::Development deployment only accepts master." >&2
+            exit 1
+          }
+          runs="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=push&head_sha=$GITHUB_SHA&per_page=30")"
+          jq -e --arg sha "$GITHUB_SHA" '
+            [.workflow_runs[] | select(.head_sha == $sha
+              and .head_branch == "master"
+              and .status == "completed"
+              and .conclusion == "success")] | length > 0
+          ' <<<"$runs" >/dev/null || {
+            echo "::error::Exact master SHA must pass push Full CI." >&2
+            exit 1
+          }
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_REF }}
-
-      - name: Resolve immutable release
-        id: release
-        run: |
-          release_sha="$(git rev-parse HEAD)"
-          echo "sha=$release_sha" >>"$GITHUB_OUTPUT"
-          echo "RELEASE_SHA=$release_sha" >>"$GITHUB_ENV"
-
-      - name: Validate deployment configuration
-        run: |
-          set -Eeuo pipefail
-          case "$DEPLOY_ENV" in development|production) ;; *) exit 1 ;; esac
-          missing=0
-          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_DEPLOYMENT_PATH SSH_PORT; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "::error::${name} is not configured for the ${DEPLOY_ENV} environment"
-              missing=1
-            fi
-          done
-          test "$missing" -eq 0
-          test -n "$RELEASE_REF"
-          test -n "$RELEASE_SHA"
-          test -n "$MCP_CONTROL_REF"
-
-      - name: Check out pinned mcp-control
-        uses: actions/checkout@v4
-        with:
-          repository: 0x0sky/mcp-control
-          ref: ${{ env.MCP_CONTROL_REF }}
-          path: .deps/mcp-control
           persist-credentials: false
 
-      - name: Set up Go for mcp-control
-        uses: actions/setup-go@v5
+      - name: Authenticate to producer GHCR
+        uses: docker/login-action@v3
         with:
-          go-version-file: .deps/mcp-control/go.mod
-          cache: false
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
-      - name: Build pinned mcp-control
-        run: |
-          set -Eeuo pipefail
-          install -d -m 0755 deploy/vps/mcp-control/bin
-          (
-            cd .deps/mcp-control
-            go test ./...
-            for arch in amd64 arm64; do
-              CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
-                go build \
-                  -trimpath \
-                  -ldflags="-s -w -X github.com/0x0sky/mcp-control/internal/cli.Version=$MCP_CONTROL_REF" \
-                  -o "$GITHUB_WORKSPACE/deploy/vps/mcp-control/bin/mcp-control-$arch" \
-                  ./cmd/mcp-control
-            done
-          )
-          chmod 0755 deploy/vps/mcp-control/bin/mcp-control-*
+      - name: Build and publish image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/0xda-market/core:development-${{ github.sha }}
 
-      - name: Configure SSH
-        run: |
-          set -Eeuo pipefail
-          install -m 0700 -d "$HOME/.ssh"
-
-          key_path="$HOME/.ssh/id_ed25519"
-          known_hosts_path="$HOME/.ssh/known_hosts"
-          keyscan_output="$HOME/.ssh/known_hosts.pending"
-          keyscan_error="$HOME/.ssh/ssh-keyscan.error"
-
-          printf '%s\n' "$SSH_PRIVATE_KEY" >"$key_path"
-          chmod 0600 "$key_path"
-
-          if ! ssh-keygen -y -f "$key_path" >/dev/null; then
-            echo "::error::SSH_PRIVATE_KEY is not a valid OpenSSH private key"
-            exit 1
-          fi
-
-          for attempt in 1 2 3 4 5; do
-            if ssh-keyscan -T 5 -p "$SSH_PORT" -H "$SSH_HOST" \
-              >"$keyscan_output" 2>"$keyscan_error" && [[ -s "$keyscan_output" ]]; then
-              sort -u "$keyscan_output" >"$known_hosts_path"
-              chmod 0600 "$known_hosts_path"
-              break
-            fi
-
-            if [[ "$attempt" -eq 5 ]]; then
-              cat "$keyscan_error" >&2 || true
-              echo "::error::Cannot reach the configured VPS SSH endpoint on TCP ${SSH_PORT}. Ensure sshd is listening and every provider/UFW firewall allows the port."
-              exit 1
-            fi
-
-            sleep $((attempt * 2))
-          done
-
-      - name: Upload release
-        run: |
-          set -Eeuo pipefail
-          archive="/tmp/0xda-market-${DEPLOY_ENV}-${RELEASE_SHA}.tar.gz"
-          tar --exclude=.git --exclude='.deps' --exclude='deploy/vps/.env' -czf "$archive" .
-          scp -P "$SSH_PORT" "$archive" "$SSH_USER@$SSH_HOST:/tmp/"
-
-      - name: Activate environment
-        run: |
-          set -Eeuo pipefail
-          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
-            "DEPLOY_PATH='$SSH_DEPLOYMENT_PATH' DEPLOY_ENV='$DEPLOY_ENV' RELEASE_SHA='$RELEASE_SHA' bash -s" <<'REMOTE'
-          set -Eeuo pipefail
-
-          environment_root="$DEPLOY_PATH/environments/$DEPLOY_ENV"
-          archive="/tmp/0xda-market-${DEPLOY_ENV}-${RELEASE_SHA}.tar.gz"
-          release_dir="$environment_root/releases/$RELEASE_SHA"
-          shared_env="$environment_root/shared/.env"
-          current_link="$environment_root/current"
-          previous_release="$(readlink -f "$current_link" 2>/dev/null || true)"
-
-          test -f "$shared_env"
-          grep -qx "DEPLOY_ENV=$DEPLOY_ENV" "$shared_env"
-
-          rm -rf "$release_dir"
-          mkdir -p "$release_dir"
-          tar -xzf "$archive" -C "$release_dir"
-          rm -f "$archive"
-          ln -sfn "$shared_env" "$release_dir/deploy/vps/.env"
-
-          if ! bash "$release_dir/deploy/vps/deploy.sh"; then
-            if [[ -n "$previous_release" && -d "$previous_release/deploy/vps" ]]; then
-              bash "$release_dir/deploy/vps/rollback.sh" "$previous_release" "$shared_env" || true
-            fi
-            exit 1
-          fi
-
-          ln -sfn "$release_dir" "$current_link"
-
-          find "$environment_root/releases" \
-            -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
-            | sort -nr | tail -n +4 | cut -d' ' -f2- | xargs -r rm -rf
-          REMOTE
-
-      - name: Publish VPS deployment status
-        if: always() && steps.release.outputs.sha != ''
+      - name: Pin image by digest
+        id: image
         env:
-          GH_TOKEN: ${{ github.token }}
-          DEPLOY_STATE: ${{ job.status == 'success' && 'success' || 'failure' }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -Eeuo pipefail
-          description="core ${DEPLOY_ENV} VPS deployment failed"
-          if [[ "$DEPLOY_STATE" == "success" ]]; then
-            description="core ${DEPLOY_ENV} VPS deployment is healthy"
-          fi
-          payload="$(jq -nc \
-            --arg state "$DEPLOY_STATE" \
-            --arg context "deploy/vps-core-${DEPLOY_ENV}" \
-            --arg description "$description" \
-            --arg target_url "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            '{state:$state,context:$context,description:$description,target_url:$target_url}')"
-          curl --fail-with-body --silent --show-error \
-            --request POST \
-            --header "Accept: application/vnd.github+json" \
-            --header "Authorization: Bearer $GH_TOKEN" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${RELEASE_SHA}" \
-            --data "$payload"
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "ref=ghcr.io/0xda-market/core@$DIGEST" >> "$GITHUB_OUTPUT"
+
+  activate_api:
+    name: Activate Core API and migrations
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: development
+    env:
+      WORKLOAD: market-api-development
+      IMAGE_REF: ${{ needs.package.outputs.image }}
+      GH_TOKEN: ${{ secrets.INFRA_DEPLOY_TOKEN }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      PUBLIC_API_TOKEN: ${{ secrets.PUBLIC_API_TOKEN }}
+      MANUAL_PROVIDER_TOKEN: ${{ secrets.MANUAL_PROVIDER_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Request and verify activation
+        run: bash scripts/dispatch-development-workload.sh
+
+  activate_workers:
+    name: Activate development ${{ matrix.workload }}
+    needs: [package, activate_api]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: development
+    strategy:
+      fail-fast: false
+      matrix:
+        workload:
+          - market-fx-development
+          - market-prices-development
+    env:
+      WORKLOAD: ${{ matrix.workload }}
+      IMAGE_REF: ${{ needs.package.outputs.image }}
+      GH_TOKEN: ${{ secrets.INFRA_DEPLOY_TOKEN }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Request and verify worker activation
+        run: bash scripts/dispatch-development-workload.sh

@@ -9,12 +9,18 @@ module ZeroXDA
             currency = @request_parser.requested_currency(request)
             locale = @request_parser.requested_locale(request)
             products = @catalog.products(locale: locale)
+            if request.params["preview_0x1"] == "true"
+              products += @catalog.staged_0x1_subscriptions(locale: locale)
+              products.sort_by!(&:position)
+            end
             prices = @pricing ? @pricing.current_prices : {}
             executable_skus = available_executable_skus(prices)
             data = products.map do |product|
               resource = present_product(product)
-              available = executable_skus.nil? || executable_skus.key?(product.sku)
-              price = prices[product.sku]
+              preview = product.status != "active"
+              available = !preview && (executable_skus.nil? || executable_skus.key?(product.sku))
+              price = preview ? nil : prices[product.sku]
+              resource["attributes"]["preview"] = preview
               resource["attributes"]["available"] = available
               resource["attributes"]["price"] = price && present_effective_client_price(
                 price,

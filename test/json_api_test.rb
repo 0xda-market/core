@@ -102,6 +102,47 @@ class JSONAPITest < Minitest::Test
     assert_equal 3, resource.dig("attributes", "metadata", "duration_months")
   end
 
+  def test_staged_0x1_subscriptions_are_preview_only_and_regular_catalog_is_unchanged
+    now = Time.utc(2026, 10, 22)
+    active = ZeroXDA::Market::Catalog::Product.new(
+      sku: "premium_3m", name: "Premium", button_label: "Premium",
+      metadata: { "family" => "telegram_premium" }, position: 1, created_at: now
+    )
+    staged = ZeroXDA::Market::Catalog::Product.new(
+      sku: "0x1_exclusive_1m", name: "Exclusive", button_label: "Exclusive 1m",
+      metadata: { "family" => "0x1_subscription", "tier" => "exclusive", "duration_months" => 1 },
+      status: "inactive", position: 2, created_at: now
+    )
+    unrelated = ZeroXDA::Market::Catalog::Product.new(
+      sku: "hidden_product", name: "Hidden", button_label: "Hidden",
+      metadata: { "family" => "telegram_stars" }, status: "inactive", position: 3, created_at: now
+    )
+    catalog = ZeroXDA::Market::Catalog::Service.new(
+      store: ZeroXDA::Market::Catalog::MemoryStore.new(products: [active, staged, unrelated])
+    )
+    client = Rack::MockRequest.new(
+      ZeroXDA::Market::Transport::JSONAPI.new(
+        kernel: @kernel, token: "client-secret", catalog: catalog
+      )
+    )
+    headers = { "HTTP_AUTHORIZATION" => "Bearer client-secret" }
+
+    regular = JSON.parse(client.get("/v1/products", headers).body).fetch("data")
+    assert_equal ["premium_3m"], regular.map { |item| item.fetch("id") }
+
+    response = client.get("/v1/products?locale=uk_UA&preview_0x1=true", headers)
+    assert_equal 200, response.status
+    preview = JSON.parse(response.body).fetch("data")
+    assert_equal %w[premium_3m 0x1_exclusive_1m], preview.map { |item| item.fetch("id") }
+    assert_equal false, preview.first.dig("attributes", "preview")
+    attributes = preview.last.fetch("attributes")
+    assert_equal "inactive", attributes.fetch("status")
+    assert_equal true, attributes.fetch("preview")
+    assert_equal false, attributes.fetch("available")
+    assert_nil attributes.fetch("price")
+    assert_equal 1, JSON.parse(response.body).dig("meta", "available_count")
+  end
+
   def test_price_application_records_the_internal_admin_user_id
     clock = MutableClock.new
     store = ZeroXDA::Market::Identity::MemoryStore.new

@@ -100,6 +100,12 @@ class IssuerOrdersTest < Minitest::Test
     assert_equal({ linked: false, issuer: ISSUER }, @orders.account_status(customer_user_id: @stranger.id, issuer: ISSUER))
   end
 
+  def test_account_status_cannot_attribute_0x1_binding_to_another_issuer
+    assert_raises(Core::NotFound) do
+      @orders.account_status(customer_user_id: @customer.id, issuer: "unrelated.issuer")
+    end
+  end
+
   def test_a_withdrawn_binding_stops_new_orders
     @directory = ZeroXDA::Market::IssuerOrders::MemoryDirectory.new({}, providers: %w[channel.example])
     orders = ZeroXDA::Market::IssuerOrders::Service.new(

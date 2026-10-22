@@ -41,10 +41,12 @@ module ZeroXDA
         def route(request)
           method = request.request_method
           if method == "GET" && request.path_info == "/v1/orders"
-            orders = @issuer_orders.queue(issuer: @issuer, status: request.params.fetch("status", "pending"),
-                                          limit: request.params.fetch("limit", 50))
+            orders, cursor = @issuer_orders.queue(issuer: @issuer, status: request.params.fetch("status", "pending"),
+                                                  limit: request.params.fetch("limit", 50),
+                                                  cursor: request.params["cursor"])
             return json_response(200, { "data" => orders.map { |order| present_issuer_order(order) },
-                                        "meta" => { "count" => orders.length, "issuer" => @issuer } })
+                                        "meta" => { "count" => orders.length, "issuer" => @issuer,
+                                                    "next_cursor" => cursor } })
           end
 
           if request.path_info == "/v1/account-links"

@@ -66,10 +66,13 @@ module ZeroXDA
           end
         end
 
-        def list(issuer:, status:, limit:)
+        # Oldest first, keyset-paginated: after is the [created_at, id] of the
+        # last order of the previous page.
+        def list(issuer:, status:, limit:, after: nil)
           @mutex.synchronize do
             @orders.values
                    .select { |order| order.issuer == issuer && order.status == status }
+                   .select { |order| after.nil? || ([order.created_at, order.id] <=> after).positive? }
                    .sort_by { |order| [order.created_at, order.id] }
                    .first(limit)
           end

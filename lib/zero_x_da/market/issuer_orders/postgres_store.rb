@@ -75,9 +75,12 @@ module ZeroXDA
                                                                       details: { reference: order.issuer_reference })
         end
 
-        def list(issuer:, status:, limit:)
-          @orders.where(issuer: issuer, status: status)
-                 .order(:created_at, :id)
+        # Oldest first, keyset-paginated: after is the [created_at, id] of the
+        # last order of the previous page.
+        def list(issuer:, status:, limit:, after: nil)
+          scope = @orders.where(issuer: issuer, status: status)
+          scope = scope.where(Sequel.lit("(created_at, id) > (?, ?::uuid)", *after)) if after
+          scope.order(:created_at, :id)
                  .limit(limit)
                  .all
                  .map { |row| deserialize(row) }

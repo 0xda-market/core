@@ -219,13 +219,32 @@ class IssuerOrdersTest < Minitest::Test
     end
   end
 
+  def test_recovery_scan_pages_through_more_than_one_hundred_processing_orders
+    ids = 105.times.map do |index|
+      @clock.advance(index.even? ? 0 : 1)
+      order, = create_order(key: format("order-key-%03d", index))
+      @orders.claim(order.id, issuer: ISSUER).id
+    end
+
+    seen = []
+    cursor = nil
+    loop do
+      page, cursor = @orders.queue(issuer: ISSUER, status: "processing", limit: 100, cursor: cursor)
+      seen.concat(page.map(&:id))
+      break unless cursor
+    end
+    assert_equal ids.sort, seen.sort
+    assert_equal seen.uniq, seen
+    assert_raises(ArgumentError) { @orders.queue(issuer: ISSUER, cursor: "not-a-cursor") }
+  end
+
   def test_orders_are_scoped_to_their_customer_and_issuer
     order, = create_order
     assert_raises(Core::NotFound) { @orders.find_for_customer(order.id, customer_user_id: @stranger.id) }
     assert_raises(Core::NotFound) { @orders.cancel(order.id, customer_user_id: @stranger.id) }
     assert_raises(Core::NotFound) { @orders.claim(order.id, issuer: "elsewhere.example") }
-    assert_empty @orders.queue(issuer: "elsewhere.example")
-    assert_equal [order.id], @orders.queue(issuer: ISSUER).map(&:id)
+    assert_empty @orders.queue(issuer: "elsewhere.example").first
+    assert_equal [order.id], @orders.queue(issuer: ISSUER).first.map(&:id)
   end
 
   def test_client_api_creates_replays_reads_and_cancels

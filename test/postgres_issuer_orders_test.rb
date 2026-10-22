@@ -128,6 +128,28 @@ class PostgresIssuerOrdersTest < Minitest::Test
     end
   end
 
+  def test_queue_cursor_reaches_every_order_with_equal_timestamps
+    within_fixture do |customer|
+      clock_time = Time.utc(2026, 10, 22, 12, 0, 0)
+      orders = ZeroXDA::Market::IssuerOrders::Service.new(store: @store, denominations: @denominations,
+                                                          users: @identity_store, clock: -> { clock_time })
+      ids = 5.times.map do |index|
+        orders.create(customer_user_id: customer.id, sku: "issuer_order_fixture", denomination: "seeds",
+                      idempotency_key: "same-time-#{index}").first.id
+      end
+
+      seen = []
+      cursor = nil
+      loop do
+        page, cursor = orders.queue(issuer: "0x1", limit: 2, cursor: cursor)
+        seen.concat(page.map(&:id))
+        break unless cursor
+      end
+      assert_equal ids.sort, (seen & ids).sort
+      assert_equal seen.uniq, seen
+    end
+  end
+
   def test_unknown_or_malformed_ids_are_not_found
     assert_nil @store.find("not-a-uuid")
     assert_nil @store.find(SecureRandom.uuid)

@@ -63,6 +63,9 @@ issuer_api_issuer = ENV["ISSUER_API_ISSUER"].to_s
 if issuer_api_token.empty? != issuer_api_issuer.empty?
   raise "ISSUER_API_TOKEN and ISSUER_API_ISSUER must be configured together"
 end
+# Customer issuer-order routes trust actor_user_id from the shared public
+# token, so they stay off until a verified customer boundary exists.
+issuer_order_routes = ENV.fetch("ENABLE_ISSUER_ORDER_ROUTES", "0") == "1"
 market_payment_provider = ENV["MARKET_PAYMENT_PROVIDER"].to_s.strip
 manual_quote_ttl = Integer(ENV.fetch("MANUAL_QUOTE_TTL_SECONDS", "900"))
 raise "MANUAL_QUOTE_TTL_SECONDS must be positive" unless manual_quote_ttl.positive?
@@ -72,6 +75,7 @@ end
 
 if environment == "production"
   raise "mock payment provider cannot be enabled in production" if mock_payment_enabled
+  raise "issuer order routes cannot be enabled in production yet" if issuer_order_routes
   required_secrets = { "PUBLIC_API_TOKEN" => public_token, "MANUAL_PROVIDER_TOKEN" => operator_token,
                        "DATABASE_URL" => database_url }
   missing = required_secrets.filter_map { |name, value| name if value.nil? || value.empty? }
@@ -146,7 +150,7 @@ public_api = ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, token: publ
                                                      catalog: catalog, pricing: pricing, localization: localization,
                                                      listings: listings, marketplace: marketplace, broker_orders: broker_orders,
                                                      broker_earnings: broker_earnings, denominations: denominations,
-                                                     issuer_orders: issuer_orders)
+                                                     issuer_orders: issuer_order_routes ? issuer_orders : nil)
 applications = { "/" => public_api }
 operator_api = nil
 if manual_provider

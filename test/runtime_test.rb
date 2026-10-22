@@ -124,6 +124,28 @@ class RuntimeTest < Minitest::Test
     end
   end
 
+  def test_customer_issuer_order_routes_are_off_unless_enabled_and_never_in_production
+    base = { "PUBLIC_API_TOKEN" => "client-secret", "MANUAL_PROVIDER_TOKEN" => nil, "DATABASE_URL" => nil }
+
+    with_environment(base.merge("DEPLOY_ENV" => "development", "ENABLE_ISSUER_ORDER_ROUTES" => nil)) do
+      app = Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__))
+      assert_equal "route_not_found", issuer_account_error(app)
+      created = post_json(app, "/v1/issuer-orders", {}, authorization: "Bearer client-secret")
+      assert_equal "route_not_found", JSON.parse(created.body).dig("errors", 0, "code")
+    end
+
+    with_environment(base.merge("DEPLOY_ENV" => "development", "ENABLE_ISSUER_ORDER_ROUTES" => "1")) do
+      app = Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__))
+      assert_equal "not_found", issuer_account_error(app)
+    end
+
+    with_environment(base.merge("DEPLOY_ENV" => "production", "DATABASE_URL" => "postgresql://unused",
+                                "MANUAL_PROVIDER_TOKEN" => "operator-secret", "ENABLE_ISSUER_ORDER_ROUTES" => "1")) do
+      error = assert_raises(RuntimeError) { Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)) }
+      assert_includes error.message, "issuer order routes"
+    end
+  end
+
   def test_rejects_a_half_configured_issuer_api
     with_environment(
       "DEPLOY_ENV" => "development", "PUBLIC_API_TOKEN" => "client-secret", "MANUAL_PROVIDER_TOKEN" => nil,
@@ -168,6 +190,14 @@ class RuntimeTest < Minitest::Test
         ENV.delete(name)
       end
     end
+  end
+
+  # The error code for an account-status request by an unknown user:
+  # route_not_found when the routes are off, not_found for the user otherwise.
+  def issuer_account_error(app)
+    response = Rack::MockRequest.new(app).get("/v1/issuer-accounts/issuer.example?actor_user_id=unknown",
+                                              "HTTP_AUTHORIZATION" => "Bearer client-secret")
+    JSON.parse(response.body).dig("errors", 0, "code")
   end
 
   def post_json(app, path, body, authorization: nil)

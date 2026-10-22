@@ -98,7 +98,9 @@ denomination is a `409 idempotency_conflict`.
 ## API
 
 Customer routes on the public API (public bearer token, `actor_user_id` is the
-customer):
+customer). They are mounted only with `ENABLE_ISSUER_ORDER_ROUTES=1`, which is
+off by default and refused in production until the customer-authentication
+gate below is closed:
 
 | Route | Purpose |
 | --- | --- |
@@ -112,7 +114,7 @@ Issuer routes are mounted at `/issuer` only when `ISSUER_API_TOKEN` and
 
 | Route | Purpose |
 | --- | --- |
-| `GET /issuer/v1/orders?status=pending&limit=` | oldest-first queue |
+| `GET /issuer/v1/orders?status=pending&limit=&cursor=` | oldest-first queue; `meta.next_cursor` fetches the next page |
 | `GET /issuer/v1/orders/:id` | read one order |
 | `POST /issuer/v1/orders/:id/claim` | take an order before debiting |
 | `POST /issuer/v1/orders/:id/fulfil` | `issuer_reference`, `amount_minor`, `denomination`, `recipient_subject` |
@@ -129,7 +131,10 @@ A `processing` order means the issuer claimed it; the market cannot tell
 whether the debit and grant already happened. Recovery is driven by the issuer,
 which owns that fact:
 
-1. List claimed orders: `GET /issuer/v1/orders?status=processing`.
+1. List claimed orders: `GET /issuer/v1/orders?status=processing`, following
+   `meta.next_cursor` (`&cursor=`) until it is `null`. The queue is keyset
+   paginated by `(created_at, id)`, so a long backlog of stuck orders never hides
+   later ones.
 2. For each one, look up the issuer's own operation keyed by the order `id`.
 3. If the debit and grant completed, repeat `fulfil` with the same
    `issuer_reference` and the order's exact amount, denomination and recipient.
@@ -156,6 +161,11 @@ an issuer account that the issuer itself linked to that customer's channel
 account, and the issuer can re-check the snapshotted channel account before it
 debits. What remains is trust in the channel: a holder of the public token who
 claims to be `messenger:123` reaches the account linked to `messenger:123`.
+
+This gate is enforced, not only documented: customer routes are off unless
+`ENABLE_ISSUER_ORDER_ROUTES=1`, and a production boot with that flag refuses to
+start. Lifting the production refusal is a separate change. It must come with a
+verified customer boundary.
 
 Before activation, the deployment must ensure that only the channel adapter,
 which verifies the provider's own proof (for example signed host or login data), can reach customer routes with the public token. A cross-customer

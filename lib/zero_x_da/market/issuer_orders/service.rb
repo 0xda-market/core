@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "securerandom"
+require "time"
 require_relative "../core/contracts"
 require_relative "account_link"
 require_relative "order"
@@ -51,10 +52,16 @@ module ZeroXDA
           apply(order, order.cancel(at: now), actor: "customer")
         end
 
-        def queue(issuer:, status: "pending", limit: 50)
+        # A page of the issuer's orders, oldest first. Returns [orders, cursor];
+        # cursor is nil on the last page, otherwise it fetches the next one, so
+        # a recovery scan reaches every order however long the backlog is.
+        def queue(issuer:, status: "pending", limit: 50, cursor: nil)
           raise ArgumentError, "status is invalid" unless Order::STATUSES.include?(status)
 
-          @store.list(issuer: issuer, status: status, limit: page_size(limit))
+          size = page_size(limit)
+          orders = @store.list(issuer: issuer, status: status, limit: size, after: decode_cursor(cursor))
+          last = orders.last
+          [orders, orders.length == size && last ? "#{last.created_at.iso8601(6)},#{last.id}" : nil]
         end
 
         def find_for_issuer(id, issuer:)
@@ -214,6 +221,17 @@ module ZeroXDA
         def event_for(order, from:, actor:, data: {})
           Event.new(order_id: order.id, from_status: from, to_status: order.status, actor: actor,
                     data: data, created_at: order.updated_at)
+        end
+
+        def decode_cursor(cursor)
+          return nil if cursor.nil? || cursor.to_s.empty?
+
+          timestamp, id = cursor.to_s.split(",", 2)
+          raise ArgumentError unless id&.match?(/\A[A-Za-z0-9-]{1,64}\z/)
+
+          [Time.iso8601(timestamp).getutc, id]
+        rescue ArgumentError, TypeError
+          raise ArgumentError, "cursor is invalid"
         end
 
         def page_size(value)

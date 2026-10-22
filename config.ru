@@ -71,8 +71,9 @@ issuer_directory_providers = ENV["ISSUER_DIRECTORY_PROVIDERS"].to_s.split(",").m
 if issuer_directory_url.empty? != issuer_directory_token.empty?
   raise "ISSUER_DIRECTORY_URL and ISSUER_DIRECTORY_TOKEN must be configured together"
 end
-# Customer issuer-order routes trust actor_user_id from the shared public
-# token, so they stay off until a verified customer boundary exists.
+# A server-injected, verified customer Rack context is required by the router,
+# but production has no channel-proof authenticator supplying that context yet.
+# Customer routes stay off until the verified ingress and its tests ship.
 issuer_order_routes = ENV.fetch("ENABLE_ISSUER_ORDER_ROUTES", "0") == "1"
 market_payment_provider = ENV["MARKET_PAYMENT_PROVIDER"].to_s.strip
 manual_quote_ttl = Integer(ENV.fetch("MANUAL_QUOTE_TTL_SECONDS", "900"))

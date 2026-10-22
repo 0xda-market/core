@@ -27,6 +27,27 @@ module ZeroXDA
                 amount_usdt: price.amount_usdt,
                 currency: currency
               )
+              # Staged 0x1 subscriptions may show a read-only price, never
+              # checkout terms. Keep price=nil and available=false while
+              # entitlement fulfillment and payment are not configured.
+              if preview && product.metadata["family"] == "0x1_subscription"
+                staged_price = prices[product.sku]
+                resource["attributes"]["preview_price"] = if staged_price
+                  begin
+                    present_effective_client_price(
+                      staged_price,
+                      amount_usdt: staged_price.amount_usdt,
+                      currency: currency
+                    )
+                  rescue Localization::RateUnavailable
+                    present_effective_client_price(
+                      staged_price,
+                      amount_usdt: staged_price.amount_usdt,
+                      currency: "USDT"
+                    )
+                  end
+                end
+              end
               resource
             end
             json_response(

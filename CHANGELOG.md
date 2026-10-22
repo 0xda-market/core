@@ -16,8 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read/admin JSON routes. The registry stays outside FX and balances.
 - Issuer orders: purchases paid in an issuer denomination, with a snapshotted
   price and recipient, customer create/read/cancel routes, and a separately
-  authenticated issuer API to claim, fulfil or reject. The market holds no
-  balance and never settles the denomination itself.
+  authenticated issuer API to claim, fulfil or reject. The recipient is found
+  through issuer-asserted account links from the customer's channel account
+  (for example a messenger account), which only the issuer can publish or withdraw. The
+  market holds no balance and never settles the denomination itself.
 
 ### Fixed
 

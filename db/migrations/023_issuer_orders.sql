@@ -3,7 +3,24 @@
 -- records the customer's request with a snapshotted price and recipient, then
 -- waits for the issuer's asynchronous decision. No balance, USDT valuation,
 -- FX rate, broker inventory or market settlement is involved.
---
+
+-- The issuer's assertions that a channel account (provider + provider user id,
+-- for example a Telegram account) is bound to one of its accounts. Only the
+-- issuer writes these rows; they mirror its own binding rules: one channel
+-- account per issuer account and provider, one issuer account per channel
+-- account. pub_dress is the issuer's opaque public handle, kept for display.
+CREATE TABLE market.issuer_account_links (
+  issuer text NOT NULL,
+  provider text NOT NULL CHECK (provider ~ '^[a-z][a-z0-9._-]{0,63}$'),
+  provider_user_id text NOT NULL CHECK (length(provider_user_id) BETWEEN 1 AND 256),
+  subject text NOT NULL CHECK (length(subject) BETWEEN 1 AND 256),
+  pub_dress text NOT NULL CHECK (length(pub_dress) BETWEEN 1 AND 128),
+  linked_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  PRIMARY KEY (issuer, provider, provider_user_id),
+  UNIQUE (issuer, subject, provider)
+);
+
 -- Lifecycle:
 --   pending -> processing (issuer claimed it; the customer can no longer cancel)
 --   pending -> cancelled  (customer, before any issuer claim)
@@ -20,6 +37,10 @@ CREATE TABLE market.issuer_orders (
   amount_minor bigint NOT NULL CHECK (amount_minor > 0),
   price_id bigint NOT NULL REFERENCES market.denomination_prices(id),
   recipient_subject text NOT NULL CHECK (length(recipient_subject) BETWEEN 1 AND 256),
+  -- The channel account whose issuer link selected the recipient, so the
+  -- issuer can re-check that binding before it debits.
+  link_provider text NOT NULL,
+  link_provider_user_id text NOT NULL,
   status text NOT NULL
     CHECK (status IN ('pending', 'processing', 'fulfilled', 'rejected', 'cancelled')),
   issuer_reference text CHECK (length(issuer_reference) BETWEEN 1 AND 256),

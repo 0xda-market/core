@@ -30,18 +30,29 @@ module ZeroXDA
               denomination: body.fetch("denomination"),
               idempotency_key: body.fetch("idempotency_key")
             )
-            resource_response(created ? 201 : 200, present_issuer_order(order))
+            resource_response(created ? 201 : 200, present_issuer_order(order, audience: :customer))
           end
 
           def find_issuer_order(request, id:)
             order = @issuer_orders.find_for_customer(id, customer_user_id: request.params["actor_user_id"])
-            resource_response(200, present_issuer_order(order))
+            resource_response(200, present_issuer_order(order, audience: :customer))
+          end
+
+          # The issuer subject stays private; the channel gets only the public
+          # handle to show, or linked: false to offer signing in with the issuer.
+          def issuer_account_status(request, issuer:)
+            status = @issuer_orders.account_status(customer_user_id: request.params["actor_user_id"], issuer: issuer)
+            resource_response(
+              200,
+              { "type" => "issuer_account", "id" => issuer,
+                "attributes" => status.transform_keys(&:to_s).except("issuer") }
+            )
           end
 
           def cancel_issuer_order(request, id:)
             body = @request_parser.request_document(request)
             order = @issuer_orders.cancel(id, customer_user_id: body.fetch("actor_user_id"))
-            resource_response(200, present_issuer_order(order))
+            resource_response(200, present_issuer_order(order, audience: :customer))
           end
         end
 

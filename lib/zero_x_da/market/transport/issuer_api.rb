@@ -47,6 +47,12 @@ module ZeroXDA
                                         "meta" => { "count" => orders.length, "issuer" => @issuer } })
           end
 
+          if request.path_info == "/v1/account-links"
+            return account_link(request) if %w[PUT DELETE].include?(method)
+
+            return not_found
+          end
+
           match = ORDER_PATH.match(request.path_info)
           return not_found unless match
 
@@ -72,6 +78,22 @@ module ZeroXDA
             body = @request_parser.request_document(request)
             @issuer_orders.reject(id, issuer: @issuer, code: body.fetch("code"))
           end
+        end
+
+        # The issuer publishes and withdraws its own channel-account bindings.
+        def account_link(request)
+          if request.request_method == "PUT"
+            body = @request_parser.request_document(request)
+            link = @issuer_orders.link_account(
+              issuer: @issuer, provider: body.fetch("provider"), provider_user_id: body.fetch("provider_user_id"),
+              subject: body.fetch("subject"), pub_dress: body.fetch("pub_dress")
+            )
+            return resource_response(200, present_account_link(link))
+          end
+
+          removed = @issuer_orders.unlink_account(issuer: @issuer, provider: request.params.fetch("provider"),
+                                                  provider_user_id: request.params.fetch("provider_user_id"))
+          json_response(200, { "meta" => { "removed" => removed } })
         end
 
         def not_found

@@ -42,12 +42,48 @@ pending ──claim──▶ processing ──fulfil──▶ fulfilled
 Every transition is idempotent for the same input, uses optimistic locking, and
 appends an event to `market.issuer_order_events`, which is append-only.
 
-## Recipient
+## Recipient: issuer account links
 
-The recipient is always the customer's own account at the issuer. The product's
-`metadata.purchase.recipient.provider` must equal the denomination's `issuer`
-and allow `self`. The customer must have an external identity with that
-provider. Its `provider_user_id` is snapshotted as `recipient_subject`.
+The recipient is always the customer's own issuer account. The market never
+decides on its own whose account that is. The issuer tells it, through
+**account links**: an issuer-asserted binding from a channel account (for
+example a messenger account, `provider` + `provider_user_id`) to one issuer
+account (`subject`, plus its public handle `pub_dress`).
+
+```text
+customer --channel login--> market user + channel identity (e.g. messenger:123)
+issuer   --account link---> messenger:123 -> subject S, pub_dress "zero"
+order    --recipient------> S, snapshotted with link_provider / link_provider_user_id
+```
+
+- Only the issuer writes links, through its own API. A channel or customer
+  cannot create or change one.
+- Links mirror the issuer's binding rules. One channel account maps to at most
+  one issuer account. One issuer account holds at most one channel account per
+  provider. A second one is `409 issuer_account_link_conflict`, and the issuer
+  must unlink the first account itself.
+- The product's `metadata.purchase.recipient.provider` must equal the
+  denomination's `issuer` and allow `self`.
+- No link: `409 issuer_account_unlinked`. Channel accounts that link to
+  different issuer accounts: `409 recipient_ambiguous`. The market never
+  guesses whose balance to debit.
+- The order snapshots `recipient_subject` and the channel account that selected
+  it (`link_provider`, `link_provider_user_id`). The issuer can therefore check
+  that the binding still holds before it debits.
+- Customer responses never include `recipient_subject` or the channel account
+  id. A channel gets only `linked` and the public `pub_dress`.
+
+### Channel flow
+
+1. The channel calls `GET /v1/issuer-accounts/:issuer?actor_user_id=`.
+2. If it returns `linked: true`, the channel shows the `pub_dress` and offers
+   checkout in the denomination.
+3. If it returns `linked: false`, the channel offers signing in with the issuer
+   to link this channel account. The issuer's own sign-in window enforces its
+   binding rules. For example, if the issuer account already holds another
+   account of that provider, that window says so and no link is published.
+4. After a successful link, the issuer publishes it with
+   `PUT /issuer/v1/account-links`, and the channel re-checks the status.
 
 ## Ordering rules
 
@@ -69,6 +105,7 @@ customer):
 | `POST /v1/issuer-orders` | `actor_user_id`, `sku`, `denomination`, `idempotency_key`; `201` created, `200` replay |
 | `GET /v1/issuer-orders/:id?actor_user_id=` | read own order; another customer's order is `404` |
 | `POST /v1/issuer-orders/:id/cancel` | cancel own pending order |
+| `GET /v1/issuer-accounts/:issuer?actor_user_id=` | `linked`, and the public `pub_dress` when linked |
 
 Issuer routes are mounted at `/issuer` only when `ISSUER_API_TOKEN` and
 `ISSUER_API_ISSUER` are both set. The token sees only the named issuer's orders.
@@ -80,6 +117,8 @@ Issuer routes are mounted at `/issuer` only when `ISSUER_API_TOKEN` and
 | `POST /issuer/v1/orders/:id/claim` | take an order before debiting |
 | `POST /issuer/v1/orders/:id/fulfil` | `issuer_reference`, `amount_minor`, `denomination`, `recipient_subject` |
 | `POST /issuer/v1/orders/:id/reject` | `code` (`^[a-z][a-z0-9_]{1,63}$`) |
+| `PUT /issuer/v1/account-links` | `provider`, `provider_user_id`, `subject`, `pub_dress`; publish or update a link |
+| `DELETE /issuer/v1/account-links?provider=&provider_user_id=` | withdraw a link |
 
 The expected issuer loop is: poll the queue, claim, perform the atomic debit
 and grant keyed by the order `id`, then fulfil or reject.
@@ -105,26 +144,25 @@ be rehearsed against a staging issuer before the issuer worker is enabled.
 
 ## Activation gates
 
-Seeds checkout must stay inactive until both gates below are resolved, each
-with a real integration test.
+Seeds checkout stays inactive until the gates below are met, each with an
+integration test against the real channel and issuer.
 
 ### Customer authentication
 
-Customer routes take `actor_user_id` from the request, and the public API is
-protected only by the shared public bearer token. That token identifies a
-trusted channel, not a customer. A holder of the token can therefore act for
-any market user, and for this workflow that leads to a debit at the issuer. Before activation, the
-customer must come from a verified principal, or the deployment must enforce a
-single trusted gateway that authenticates the customer, injects
-`actor_user_id`, and blocks direct client access. A cross-customer attempt
-must be tested at that boundary.
+Customer routes take `actor_user_id` from the request. The public API is
+protected by the shared public bearer token, which identifies a trusted
+channel, not a customer. Account links narrow the risk: an order can debit only
+an issuer account that the issuer itself linked to that customer's channel
+account, and the issuer can re-check the snapshotted channel account before it
+debits. What remains is trust in the channel: a holder of the public token who
+claims to be `messenger:123` reaches the account linked to `messenger:123`.
 
-### Issuer identity key
+Before activation, the deployment must ensure that only the channel adapter,
+which verifies the provider's own proof (for example signed host or login data), can reach customer routes with the public token. A cross-customer
+attempt must be tested at that boundary.
 
-The identity service accepts provider keys matching `^[a-z][a-z0-9._-]{0,63}$`.
-The seeds issuer and the 0x1 subscription recipient provider are both `0x1`,
-which starts with a digit, so no customer can currently link a `0x1` identity.
-Until the 0x1 identity integration chooses its provider key, seeds orders
-cannot resolve a recipient, and they fail with `recipient_identity_unavailable`.
-Changing the pattern alone is not enough: the link between a market customer
-and their issuer subject must itself be verified by the issuer.
+### Issuer integration
+
+The issuer must implement its side of the contract: publish and withdraw
+account links whenever a binding changes, run the claim → debit+grant →
+fulfil/reject loop, and rehearse the recovery procedure above.

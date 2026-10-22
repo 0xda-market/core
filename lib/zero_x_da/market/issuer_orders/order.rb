@@ -18,12 +18,12 @@ module ZeroXDA
         REJECTION_CODE_PATTERN = /\A[a-z][a-z0-9_]{1,63}\z/
 
         attr_reader :id, :customer_user_id, :idempotency_key, :sku, :denomination, :issuer,
-                    :amount_minor, :price_id, :recipient_subject, :status, :issuer_reference,
+                    :amount_minor, :price_id, :recipient_subject, :link_provider, :link_provider_user_id, :status, :issuer_reference,
                     :rejection_code, :created_at, :updated_at, :claimed_at, :completed_at, :version
 
         def initialize(
           id:, customer_user_id:, idempotency_key:, sku:, denomination:, issuer:, amount_minor:,
-          price_id:, recipient_subject:, created_at:, status: "pending", issuer_reference: nil,
+          price_id:, recipient_subject:, link_provider:, link_provider_user_id:, created_at:, status: "pending", issuer_reference: nil,
           rejection_code: nil, updated_at: created_at, claimed_at: nil, completed_at: nil, version: 0
         )
           @id = Core::RecordSupport.identifier(id, field: "issuer order id")
@@ -35,6 +35,8 @@ module ZeroXDA
           @amount_minor = positive_integer(amount_minor, field: "amount_minor")
           @price_id = positive_integer(price_id, field: "price_id")
           @recipient_subject = bounded_string(recipient_subject, field: "recipient_subject")
+          @link_provider = Core::RecordSupport.identifier(link_provider, field: "link_provider")
+          @link_provider_user_id = bounded_string(link_provider_user_id, field: "link_provider_user_id")
           raise ArgumentError, "issuer order status is invalid" unless STATUSES.include?(status)
 
           @status = status.dup.freeze
@@ -77,7 +79,8 @@ module ZeroXDA
           {
             id: @id, customer_user_id: @customer_user_id, idempotency_key: @idempotency_key, sku: @sku,
             denomination: @denomination, issuer: @issuer, amount_minor: @amount_minor, price_id: @price_id,
-            recipient_subject: @recipient_subject, status: @status, issuer_reference: @issuer_reference,
+            recipient_subject: @recipient_subject, link_provider: @link_provider,
+            link_provider_user_id: @link_provider_user_id, status: @status, issuer_reference: @issuer_reference,
             rejection_code: @rejection_code, created_at: @created_at, updated_at: @updated_at,
             claimed_at: @claimed_at, completed_at: @completed_at, version: @version
           }

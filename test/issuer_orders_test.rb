@@ -52,7 +52,7 @@ class IssuerOrdersTest < Minitest::Test
 
     @identity_store = ZeroXDA::Market::Identity::MemoryStore.new
     identities = ZeroXDA::Market::Identity::Service.new(store: @identity_store, clock: @clock, id_generator: SequenceIDs.new)
-    @customer = identities.authenticate(provider: ISSUER, provider_user_id: "bond-1").user
+    @customer = identities.authenticate(provider: "channel.example", provider_user_id: "100").user
     @stranger = identities.authenticate(provider: "channel.example", provider_user_id: "200").user
 
     @store = ZeroXDA::Market::IssuerOrders::MemoryStore.new
@@ -60,6 +60,8 @@ class IssuerOrdersTest < Minitest::Test
       store: @store, denominations: @denominations, users: @identity_store, clock: @clock,
       id_generator: SequenceIDs.new
     )
+    @orders.link_account(issuer: ISSUER, provider: "channel.example", provider_user_id: "100",
+                         subject: "bond-1", pub_dress: "zero")
     kernel, = build_kernel(provider: TestProvider.new(clock: @clock), clock: @clock)
     @client = Rack::MockRequest.new(
       ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, catalog: @catalog, issuer_orders: @orders)
@@ -83,6 +85,53 @@ class IssuerOrdersTest < Minitest::Test
     assert_equal 1, @orders.events(order.id).length
   end
 
+  def test_order_records_which_channel_account_selected_the_recipient
+    order, = create_order
+    assert_equal ["channel.example", "100", "bond-1"],
+                 [order.link_provider, order.link_provider_user_id, order.recipient_subject]
+  end
+
+  def test_account_status_shows_only_the_public_handle_or_unlinked
+    assert_equal({ linked: true, issuer: ISSUER, pub_dress: "zero", provider: "channel.example" },
+                 @orders.account_status(customer_user_id: @customer.id, issuer: ISSUER))
+    assert_equal({ linked: false, issuer: ISSUER }, @orders.account_status(customer_user_id: @stranger.id, issuer: ISSUER))
+  end
+
+  def test_relinking_updates_the_handle_and_unlinking_stops_new_orders
+    first = @store.find_link(issuer: ISSUER, provider: "channel.example", provider_user_id: "100")
+    @clock.advance(60)
+    renamed = @orders.link_account(issuer: ISSUER, provider: "channel.example", provider_user_id: "100",
+                                   subject: "bond-1", pub_dress: "zero-renamed")
+    assert_equal ["zero-renamed", first.linked_at, @clock.call], [renamed.pub_dress, renamed.linked_at, renamed.updated_at]
+
+    assert @orders.unlink_account(issuer: ISSUER, provider: "channel.example", provider_user_id: "100")
+    refute @orders.unlink_account(issuer: ISSUER, provider: "channel.example", provider_user_id: "100")
+    assert_equal "issuer_account_unlinked", assert_raises(Core::Conflict) { create_order }.code
+  end
+
+  def test_one_issuer_account_holds_one_channel_account_per_provider
+    error = assert_raises(Core::Conflict) do
+      @orders.link_account(issuer: ISSUER, provider: "channel.example", provider_user_id: "200",
+                           subject: "bond-1", pub_dress: "zero")
+    end
+    assert_equal "issuer_account_link_conflict", error.code
+    assert_nil @store.find_link(issuer: ISSUER, provider: "channel.example", provider_user_id: "200")
+  end
+
+  def test_channel_accounts_linked_to_different_issuer_accounts_are_ambiguous
+    @identity_store.insert_identity(
+      ZeroXDA::Market::Identity::ExternalIdentity.new(id: "identity-other", user_id: @customer.id,
+                                                      provider: "other.example", provider_user_id: "100",
+                                                      created_at: @clock.call)
+    )
+    @orders.link_account(issuer: ISSUER, provider: "other.example", provider_user_id: "100",
+                         subject: "bond-2", pub_dress: "other")
+
+    assert_equal "recipient_ambiguous", assert_raises(Core::Conflict) { create_order }.code
+    assert_equal "recipient_ambiguous",
+                 assert_raises(Core::Conflict) { @orders.account_status(customer_user_id: @customer.id, issuer: ISSUER) }.code
+  end
+
   def test_reused_idempotency_key_for_another_order_conflicts
     create_order
     error = assert_raises(Core::Conflict) { create_order(sku: "game_other_issuer") }
@@ -94,7 +143,7 @@ class IssuerOrdersTest < Minitest::Test
                  assert_raises(Core::Conflict) { create_order(sku: "game_staged") }.code
     assert_equal "recipient_mode_unsupported",
                  assert_raises(Core::Conflict) { create_order(sku: "game_other_issuer", key: "order-key-2") }.code
-    assert_equal "recipient_identity_unavailable",
+    assert_equal "issuer_account_unlinked",
                  assert_raises(Core::Conflict) { create_order(customer: @stranger) }.code
     assert_raises(Core::NotFound) { create_order(denomination: "gems") }
     assert_raises(ArgumentError) { create_order(key: "short") }
@@ -189,6 +238,14 @@ class IssuerOrdersTest < Minitest::Test
     assert_equal ["pending", 400], JSON.parse(read.body).dig("data", "attributes").values_at("status", "amount_minor")
     assert_equal 404, @client.get("/v1/issuer-orders/#{id}?actor_user_id=#{@stranger.id}").status
 
+    refute JSON.parse(read.body).dig("data", "attributes").key?("recipient_subject")
+
+    status = JSON.parse(@client.get("/v1/issuer-accounts/#{ISSUER}?actor_user_id=#{@customer.id}").body)
+    assert_equal({ "linked" => true, "pub_dress" => "zero", "provider" => "channel.example" },
+                 status.dig("data", "attributes"))
+    unlinked = JSON.parse(@client.get("/v1/issuer-accounts/#{ISSUER}?actor_user_id=#{@stranger.id}").body)
+    assert_equal({ "linked" => false }, unlinked.dig("data", "attributes"))
+
     cancelled = post(@client, "/v1/issuer-orders/#{id}/cancel", { actor_user_id: @customer.id })
     assert_equal "cancelled", JSON.parse(cancelled.body).dig("data", "attributes", "status")
     assert_equal 409, post(@client, "/v1/issuer-orders", order_body(sku: "game_other_issuer")).status
@@ -211,6 +268,16 @@ class IssuerOrdersTest < Minitest::Test
     assert_equal 200, fulfilled.status, fulfilled.body
     assert_equal "fulfilled", JSON.parse(fulfilled.body).dig("data", "attributes", "status")
     assert_equal 404, @issuer.get("/v1/orders/#{id}/unknown", auth).status
+
+    linked = @issuer.put("/v1/account-links", auth.merge("CONTENT_TYPE" => "application/json",
+                                                         input: JSON.generate(provider: "channel.example",
+                                                                              provider_user_id: "200",
+                                                                              subject: "bond-2", pub_dress: "two")))
+    assert_equal 200, linked.status, linked.body
+    assert_equal "two", JSON.parse(linked.body).dig("data", "attributes", "pub_dress")
+    removed = @issuer.delete("/v1/account-links?provider=channel.example&provider_user_id=200", auth)
+    assert JSON.parse(removed.body).dig("meta", "removed")
+    assert_equal 401, @issuer.delete("/v1/account-links?provider=channel.example&provider_user_id=100").status
     assert_equal 400, post(@issuer, "/v1/orders/#{id}/reject", {}, auth).status
   end
 

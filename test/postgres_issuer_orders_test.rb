@@ -106,6 +106,28 @@ class PostgresIssuerOrdersTest < Minitest::Test
     end
   end
 
+  def test_links_follow_the_issuers_binding_rules
+    within_fixture do |customer|
+      link = @store.find_link(issuer: "0x1", provider: "channel.example",
+                              provider_user_id: @connection[Sequel.qualify(:market, :user_identities)]
+                                .where(user_id: customer.id).get(:provider_user_id))
+      renamed = @orders.link_account(issuer: "0x1", provider: link.provider, provider_user_id: link.provider_user_id,
+                                     subject: link.subject, pub_dress: "renamed")
+      assert_equal ["renamed", link.linked_at], [renamed.pub_dress, renamed.linked_at]
+
+      error = assert_raises(Core::Conflict) do
+        @connection.transaction(savepoint: true) do
+          @orders.link_account(issuer: "0x1", provider: "channel.example", provider_user_id: SecureRandom.uuid,
+                               subject: link.subject, pub_dress: "thief")
+        end
+      end
+      assert_equal "issuer_account_link_conflict", error.code
+
+      assert @orders.unlink_account(issuer: "0x1", provider: link.provider, provider_user_id: link.provider_user_id)
+      assert_equal "issuer_account_unlinked", assert_raises(Core::Conflict) { create_order(customer) }.code
+    end
+  end
+
   def test_unknown_or_malformed_ids_are_not_found
     assert_nil @store.find("not-a-uuid")
     assert_nil @store.find(SecureRandom.uuid)
@@ -129,12 +151,10 @@ class PostgresIssuerOrdersTest < Minitest::Test
       )
       @denominations.apply_prices([{ "sku" => "issuer_order_fixture", "amount_minor" => 400 }], denomination: "seeds")
       identities = ZeroXDA::Market::Identity::Service.new(store: @identity_store)
-      user = identities.authenticate(provider: "channel.example", provider_user_id: SecureRandom.uuid).user
-      # The identity service rejects a provider key that starts with a digit,
-      # so the issuer account is linked at the storage layer here.
-      @connection[Sequel.qualify(:market, :user_identities)].insert(
-        id: SecureRandom.uuid, user_id: user.id, provider: "0x1", provider_user_id: "bond-#{user.id}"
-      )
+      channel_user_id = SecureRandom.uuid
+      user = identities.authenticate(provider: "channel.example", provider_user_id: channel_user_id).user
+      @orders.link_account(issuer: "0x1", provider: "channel.example", provider_user_id: channel_user_id,
+                           subject: "bond-#{user.id}", pub_dress: "fixture-#{user.id[0, 8]}")
       yield user
     end
   end

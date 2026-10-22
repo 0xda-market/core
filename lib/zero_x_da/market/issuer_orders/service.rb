@@ -2,6 +2,7 @@
 
 require "securerandom"
 require_relative "../core/contracts"
+require_relative "account_link"
 require_relative "order"
 
 module ZeroXDA
@@ -111,6 +112,30 @@ module ZeroXDA
           @store.events(id)
         end
 
+        # The issuer asserts that a channel account belongs to one of its
+        # accounts. Repeating the assertion updates the public handle.
+        def link_account(issuer:, provider:, provider_user_id:, subject:, pub_dress:)
+          timestamp = now
+          @store.upsert_link(AccountLink.new(issuer: issuer, provider: provider, provider_user_id: provider_user_id,
+                                             subject: subject, pub_dress: pub_dress, linked_at: timestamp))
+        end
+
+        def unlink_account(issuer:, provider:, provider_user_id:)
+          @store.delete_link(issuer: issuer, provider: provider.to_s, provider_user_id: provider_user_id.to_s)
+        end
+
+        # Whether the customer's channel accounts lead to an issuer account.
+        # A channel uses this to show the linked public handle, or to offer
+        # signing in with the issuer to link one.
+        def account_status(customer_user_id:, issuer:)
+          customer = active_customer(customer_user_id)
+          links = customer_links(customer, issuer)
+          return { linked: false, issuer: issuer } if links.empty?
+
+          link = single_account!(links, issuer)
+          { linked: true, issuer: issuer, pub_dress: link.pub_dress, provider: link.provider }
+        end
+
         private
 
         def build_order(customer, sku, code, idempotency_key)
@@ -124,18 +149,19 @@ module ZeroXDA
 
           product = entry.fetch(:product)
           price = entry.fetch(:price)
-          timestamp = now
+          link = recipient_link(customer, product, denomination)
           Order.new(
             id: @id_generator.call, customer_user_id: customer.id, idempotency_key: idempotency_key,
             sku: product.sku, denomination: denomination.code, issuer: denomination.issuer,
-            amount_minor: price.amount_minor, price_id: price.id,
-            recipient_subject: recipient_subject(customer, product, denomination), created_at: timestamp
+            amount_minor: price.amount_minor, price_id: price.id, recipient_subject: link.subject,
+            link_provider: link.provider, link_provider_user_id: link.provider_user_id, created_at: now
           )
         end
 
-        # The recipient is always the customer's own account at the issuer:
-        # the product must name the issuer as its recipient provider.
-        def recipient_subject(customer, product, denomination)
+        # The recipient is always the customer's own issuer account, found
+        # through an issuer-asserted link from one of the customer's channel
+        # accounts. The product must name the issuer as its recipient.
+        def recipient_link(customer, product, denomination)
           policy = product.metadata.dig("purchase", "recipient")
           unless policy.is_a?(Hash) && policy["provider"] == denomination.issuer &&
                  Array(policy.fetch("modes", ["self"])).include?("self")
@@ -143,11 +169,26 @@ module ZeroXDA
                                      code: "recipient_mode_unsupported", details: { sku: product.sku })
           end
 
-          identity = @users.identities_for_user(customer.id).find { |item| item.provider == denomination.issuer }
-          return identity.provider_user_id if identity
+          links = customer_links(customer, denomination.issuer)
+          return single_account!(links, denomination.issuer) unless links.empty?
 
-          raise Core::Conflict.new("recipient identity is unavailable", code: "recipient_identity_unavailable",
-                                                                      details: { provider: denomination.issuer, mode: "self" })
+          raise Core::Conflict.new("customer has no linked issuer account", code: "issuer_account_unlinked",
+                                                                          details: { issuer: denomination.issuer })
+        end
+
+        def customer_links(customer, issuer)
+          @users.identities_for_user(customer.id).filter_map do |identity|
+            @store.find_link(issuer: issuer, provider: identity.provider, provider_user_id: identity.provider_user_id)
+          end
+        end
+
+        # Two channel accounts linked to different issuer accounts leave the
+        # recipient ambiguous; the market never guesses whose balance to debit.
+        def single_account!(links, issuer)
+          return links.min_by(&:provider) if links.map(&:subject).uniq.length == 1
+
+          raise Core::Conflict.new("customer channel accounts link to different issuer accounts",
+                                   code: "recipient_ambiguous", details: { issuer: issuer })
         end
 
         def replayed(order, sku, denomination)

@@ -75,7 +75,12 @@ guard**. The actual hard purchase gate while staging is `status=inactive`.
 
 A channel adapter may opt into `GET /v1/products?preview_0x1=true`.
 Only staged inactive 0x1 products are added to the authenticated catalog response,
-with `preview: true`, `available: false` and `price: null`. The ordinary
+with `preview: true`, `available: false` and `price: null`. The optional
+`attributes.preview_price` is a **non-executable, read-only catalog estimate**
+from the current market-owned USDT price history; it uses current currency
+presentation when available, otherwise USDT. When no price is recorded it is
+`null`. Neither the original `price` field nor quote/order APIs change.
+The ordinary
 `/v1/products` and checkout routes remain unchanged. Other inactive products
 are never exposed. The channel adapter must use a non-purchasing callback for
 preview-only rows.

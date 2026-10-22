@@ -83,7 +83,7 @@ Without them every lookup is `issuer_unavailable`.
 
 ### Channel flow
 
-1. The channel calls `GET /v1/issuer-accounts/:issuer?actor_user_id=`.
+1. The trusted channel adapter validates signed provider login proof, resolves the market user, and calls `GET /v1/issuer-accounts/:issuer` with that verified customer context.
 2. If it returns `linked: true`, the channel shows the `pub_dress` and offers
    checkout in the denomination.
 3. If it returns `linked: false`, the channel offers signing in with the issuer
@@ -105,17 +105,21 @@ denomination is a `409 idempotency_conflict`.
 
 ## API
 
-Customer routes on the public API (public bearer token, `actor_user_id` is the
-customer). They are mounted only with `ENABLE_ISSUER_ORDER_ROUTES=1`, which is
-off by default and refused in production until the customer-authentication
-gate below is closed:
+Customer routes require **both** the public bearer token (when configured) and
+`zero_x_da.market.verified_customer_id` in the *server-side Rack environment*.
+Only the trusted channel adapter may set this key after validating provider-signed
+login proof and resolving the authenticated user's market identity. An HTTP header,
+query string or JSON body field named `actor_user_id` never sets this context.
+Missing context returns `401` before reaching the service. These routes are mounted
+only with `ENABLE_ISSUER_ORDER_ROUTES=1`, which stays off by default and is refused
+in production until the real channel adapter is integrated and tested:
 
 | Route | Purpose |
 | --- | --- |
-| `POST /v1/issuer-orders` | `actor_user_id`, `sku`, `denomination`, `idempotency_key`; `201` created, `200` replay |
-| `GET /v1/issuer-orders/:id?actor_user_id=` | read own order; another customer's order is `404` |
+| `POST /v1/issuer-orders` | `sku`, `denomination`, `idempotency_key`; `201` created, `200` replay |
+| `GET /v1/issuer-orders/:id` | read own order; another customer's order is `404` |
 | `POST /v1/issuer-orders/:id/cancel` | cancel own pending order |
-| `GET /v1/issuer-accounts/:issuer?actor_user_id=` | `linked`, and the public `pub_dress` when linked |
+| `GET /v1/issuer-accounts/:issuer` | `linked`, and the public `pub_dress` when linked |
 
 Issuer routes are mounted at `/issuer` only when `ISSUER_API_TOKEN` and
 `ISSUER_API_ISSUER` are both set. The token sees only the named issuer's orders.
@@ -160,22 +164,24 @@ integration test against the real channel and issuer.
 
 ### Customer authentication
 
-Customer routes take `actor_user_id` from the request. The public API is
-protected by the shared public bearer token, which identifies a trusted
-channel, not a customer. The issuer directory narrows the risk: an order can
-debit only the issuer account that the issuer itself binds to that customer's
-channel account, and the issuer can re-check the snapshotted channel account before it
-debits. What remains is trust in the channel: a holder of the public token who
-claims to be `messenger:123` reaches the account bound to `messenger:123`.
+Customer routes now require a server-side **verified customer context** in the Rack environment;
+`actor_user_id` supplied by a client is ignored. The shared public API token
+identifies the channel, **not** a human customer. The 0x1 partner directory resolves
+which issuer account is linked to the authenticated customer's channel account,
+but is not a substitute for customer authentication.
 
-This gate is enforced, not only documented: customer routes are off unless
-`ENABLE_ISSUER_ORDER_ROUTES=1`, and a production boot with that flag refuses to
-start. Lifting the production refusal is a separate change. It must come with a
-verified customer boundary.
+The adapter must validate the provider's signed login proof, reject stale/replayed
+proof where applicable, resolve the verified provider identity to the market user,
+and set `zero_x_da.market.verified_customer_id` on the internal Rack request. It
+must not map an incoming `X-*` HTTP header to that trusted Rack key. If the adapter
+cannot authenticate or resolve the user, it must fail closed. Core tests cover
+missing context, forged headers, body/query impersonation and cross-customer
+read/cancel/create attempts.
 
-Before activation, the deployment must ensure that only the channel adapter,
-which verifies the provider's own proof (for example signed host or login data), can reach customer routes with the public token. A cross-customer
-attempt must be tested at that boundary.
+The gate is enforced: routes are disabled unless
+`ENABLE_ISSUER_ORDER_ROUTES=1`, and production refuses that flag until a real
+verified channel adapter and end-to-end proof test are in place. Do **not**
+remove that refusal simply because the core's customer authorization tests pass.
 
 ### Issuer integration
 

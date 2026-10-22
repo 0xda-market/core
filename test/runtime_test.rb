@@ -101,6 +101,61 @@ class RuntimeTest < Minitest::Test
     end
   end
 
+  def test_mounts_the_issuer_api_only_with_its_own_token_and_issuer
+    with_environment(
+      "DEPLOY_ENV" => "development", "PUBLIC_API_TOKEN" => "client-secret", "MANUAL_PROVIDER_TOKEN" => nil,
+      "DATABASE_URL" => nil, "ISSUER_API_TOKEN" => "issuer-secret", "ISSUER_API_ISSUER" => "issuer.example"
+    ) do
+      client = Rack::MockRequest.new(Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)))
+
+      assert_equal 401, client.get("/issuer/v1/orders").status
+      assert_equal 401, client.get("/issuer/v1/orders", "HTTP_AUTHORIZATION" => "Bearer client-secret").status
+      queue = client.get("/issuer/v1/orders", "HTTP_AUTHORIZATION" => "Bearer issuer-secret")
+      assert_equal 200, queue.status
+      assert_equal "issuer.example", JSON.parse(queue.body).dig("meta", "issuer")
+    end
+
+    with_environment(
+      "DEPLOY_ENV" => "development", "PUBLIC_API_TOKEN" => "client-secret", "MANUAL_PROVIDER_TOKEN" => nil,
+      "DATABASE_URL" => nil, "ISSUER_API_TOKEN" => nil, "ISSUER_API_ISSUER" => nil
+    ) do
+      client = Rack::MockRequest.new(Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)))
+      assert_equal 401, client.get("/issuer/v1/orders", "HTTP_AUTHORIZATION" => "Bearer issuer-secret").status
+    end
+  end
+
+  def test_customer_issuer_order_routes_are_off_unless_enabled_and_never_in_production
+    base = { "PUBLIC_API_TOKEN" => "client-secret", "MANUAL_PROVIDER_TOKEN" => nil, "DATABASE_URL" => nil }
+
+    with_environment(base.merge("DEPLOY_ENV" => "development", "ENABLE_ISSUER_ORDER_ROUTES" => nil)) do
+      app = Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__))
+      assert_equal "route_not_found", issuer_account_error(app)
+      created = post_json(app, "/v1/issuer-orders", {}, authorization: "Bearer client-secret")
+      assert_equal "route_not_found", JSON.parse(created.body).dig("errors", 0, "code")
+    end
+
+    with_environment(base.merge("DEPLOY_ENV" => "development", "ENABLE_ISSUER_ORDER_ROUTES" => "1")) do
+      app = Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__))
+      assert_equal "unauthorized", issuer_account_error(app)
+    end
+
+    with_environment(base.merge("DEPLOY_ENV" => "production", "DATABASE_URL" => "postgresql://unused",
+                                "MANUAL_PROVIDER_TOKEN" => "operator-secret", "ENABLE_ISSUER_ORDER_ROUTES" => "1")) do
+      error = assert_raises(RuntimeError) { Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)) }
+      assert_includes error.message, "issuer order routes"
+    end
+  end
+
+  def test_rejects_a_half_configured_issuer_api
+    with_environment(
+      "DEPLOY_ENV" => "development", "PUBLIC_API_TOKEN" => "client-secret", "MANUAL_PROVIDER_TOKEN" => nil,
+      "DATABASE_URL" => nil, "ISSUER_API_TOKEN" => "issuer-secret", "ISSUER_API_ISSUER" => nil
+    ) do
+      error = assert_raises(RuntimeError) { Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)) }
+      assert_includes error.message, "ISSUER_API_ISSUER"
+    end
+  end
+
   def test_rejects_a_runtime_without_a_positive_marketplace_margin
     with_environment(
       "DEPLOY_ENV" => "development",
@@ -135,6 +190,14 @@ class RuntimeTest < Minitest::Test
         ENV.delete(name)
       end
     end
+  end
+
+  # The error code for an account-status request by an unknown user:
+  # route_not_found when disabled, unauthorized without a verified customer otherwise.
+  def issuer_account_error(app)
+    response = Rack::MockRequest.new(app).get("/v1/issuer-accounts/issuer.example?actor_user_id=unknown",
+                                              "HTTP_AUTHORIZATION" => "Bearer client-secret")
+    JSON.parse(response.body).dig("errors", 0, "code")
   end
 
   def post_json(app, path, body, authorization: nil)

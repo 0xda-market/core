@@ -10,9 +10,13 @@ module ZeroXDA
         class Router
           include Response
 
-          Route = Struct.new(:handler, :params, :public, keyword_init: true) do
+          Route = Struct.new(:handler, :params, :public, :customer, keyword_init: true) do
             def public?
               public
+            end
+
+            def customer?
+              customer
             end
           end
 
@@ -27,7 +31,7 @@ module ZeroXDA
             response = @error_mapper.call do
               route = resolve(request)
 
-              if route.public? || authorized?(request)
+              if route.public? || (authorized?(request) && (!route.customer? || verified_customer?(request)))
                 @endpoint_handler.public_send(route.handler, request, **route.params)
               else
                 @error_mapper.unauthorized
@@ -40,6 +44,14 @@ module ZeroXDA
 
           def authorized?(request)
             !@authentication || @authentication.authorized?(request)
+          end
+
+          # Rack environment keys cannot be supplied as HTTP request headers. A
+          # trusted channel adapter sets this only *after* verifying provider
+          # proof and resolving the authenticated market identity.
+          def verified_customer?(request)
+            id = request.get_header("zero_x_da.market.verified_customer_id")
+            id.is_a?(String) && !id.strip.empty?
           end
 
           def resolve(request)
@@ -105,6 +117,16 @@ module ZeroXDA
                available?(:admin_denomination_prices)
               return route(:denomination_price_history)
             end
+            if available?(:issuer_orders)
+              return route(:create_issuer_order, customer: true) if method == "POST" && path == "/v1/issuer-orders"
+              if method == "GET" && (match = path.match(%r{\A/v1/issuer-accounts/([^/]+)\z}))
+                return route(:issuer_account_status, issuer: match[1], customer: true)
+              end
+              if (match = path.match(%r{\A/v1/issuer-orders/([^/]+)(/cancel)?\z}))
+                return route(:find_issuer_order, id: match[1], customer: true) if method == "GET" && match[2].nil?
+                return route(:cancel_issuer_order, id: match[1], customer: true) if method == "POST" && match[2]
+              end
+            end
             return route(:create_intent) if method == "POST" && path == "/v1/intents"
 
             if method == "GET" && (match = path.match(%r{\A/v1/intents/([^/]+)\z}))
@@ -136,8 +158,8 @@ module ZeroXDA
             @endpoint_handler.available?(endpoint)
           end
 
-          def route(handler, public: false, **params)
-            Route.new(handler: handler, params: params, public: public)
+          def route(handler, public: false, customer: false, **params)
+            Route.new(handler: handler, params: params, public: public, customer: customer)
           end
         end
       end

@@ -15,6 +15,7 @@ require_relative "json_api/broker_orders"
 require_relative "json_api/broker_earnings"
 require_relative "json_api/liquidity_catalog"
 require_relative "json_api/denominations"
+require_relative "json_api/issuer_orders"
 
 module ZeroXDA
   module Market
@@ -23,7 +24,7 @@ module ZeroXDA
         def initialize(
           kernel:, token: nil, readiness: -> { true }, identity_service: nil,
           admin_service: nil, catalog: nil, pricing: nil, localization: nil,
-          listings: nil, marketplace: nil, broker_orders: nil, broker_earnings: nil, denominations: nil
+          listings: nil, marketplace: nil, broker_orders: nil, broker_earnings: nil, denominations: nil, issuer_orders: nil
         )
           error_mapper = ErrorMapper.new
           request_parser = RequestParser.new(localization: localization)
@@ -39,8 +40,7 @@ module ZeroXDA
             listings: listings,
             marketplace: marketplace,
             broker_orders: broker_orders,
-            broker_earnings: broker_earnings,
-            denominations: denominations
+            broker_earnings: broker_earnings, denominations: denominations, issuer_orders: issuer_orders
           )
           authentication = token && BearerAuth.new(token: token)
           @router = Router.new(

@@ -75,13 +75,8 @@ module ZeroXDA
         def fulfil(id, issuer:, reference:, amount_minor:, denomination:, recipient_subject:)
           order = find_for_issuer(id, issuer: issuer)
           reference = reference.to_s
-          if order.status == "fulfilled"
-            return order if order.issuer_reference == reference
-
-            raise Core::Conflict.new("issuer order is already fulfilled with another reference",
-                                     code: "issuer_reference_conflict", details: { id: order.id })
-          end
-
+          # Checked before the replay shortcut: a replay succeeds only for the
+          # same complete confirmation, never for a conflicting one.
           expected = { "amount_minor" => order.amount_minor, "denomination" => order.denomination,
                        "recipient_subject" => order.recipient_subject }
           actual = { "amount_minor" => amount_minor, "denomination" => denomination,
@@ -90,6 +85,12 @@ module ZeroXDA
           unless mismatched.empty?
             raise Core::Conflict.new("issuer confirmation does not match the order",
                                      code: "issuer_confirmation_mismatch", details: { id: order.id, fields: mismatched })
+          end
+          if order.status == "fulfilled"
+            return order if order.issuer_reference == reference
+
+            raise Core::Conflict.new("issuer order is already fulfilled with another reference",
+                                     code: "issuer_reference_conflict", details: { id: order.id })
           end
           if (other = @store.find_by_issuer_reference(issuer: issuer, reference: reference))
             raise Core::Conflict.new("issuer reference is already used", code: "issuer_reference_conflict",

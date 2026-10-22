@@ -82,14 +82,49 @@ Issuer routes are mounted at `/issuer` only when `ISSUER_API_TOKEN` and
 | `POST /issuer/v1/orders/:id/reject` | `code` (`^[a-z][a-z0-9_]{1,63}$`) |
 
 The expected issuer loop is: poll the queue, claim, perform the atomic debit
-and grant keyed by the order `id`, then fulfil or reject. A crash between the
-issuer's debit and the market's fulfil is recovered by repeating fulfil with the
-same reference.
+and grant keyed by the order `id`, then fulfil or reject.
 
-## Open contract
+## Recovery of processing orders
+
+A `processing` order means the issuer claimed it; the market cannot tell
+whether the debit and grant already happened. Recovery is driven by the issuer,
+which owns that fact:
+
+1. List claimed orders: `GET /issuer/v1/orders?status=processing`.
+2. For each one, look up the issuer's own operation keyed by the order `id`.
+3. If the debit and grant completed, repeat `fulfil` with the same
+   `issuer_reference` and the order's exact amount, denomination and recipient.
+   The repeat is idempotent; a conflicting confirmation is refused, including
+   on an already fulfilled order.
+4. If nothing was debited, `reject` with a code. The issuer must never debit
+   again under a new key for the same order.
+
+The market never expires or cancels a `processing` order on its own, so a
+completed debit is never orphaned by a market-side timeout. This procedure must
+be rehearsed against a staging issuer before the issuer worker is enabled.
+
+## Activation gates
+
+Seeds checkout must stay inactive until both gates below are resolved, each
+with a real integration test.
+
+### Customer authentication
+
+Customer routes take `actor_user_id` from the request, and the public API is
+protected only by the shared public bearer token. That token identifies a
+trusted channel, not a customer. A holder of the token can therefore act for
+any market user, and for this workflow that leads to a debit at the issuer. Before activation, the
+customer must come from a verified principal, or the deployment must enforce a
+single trusted gateway that authenticates the customer, injects
+`actor_user_id`, and blocks direct client access. A cross-customer attempt
+must be tested at that boundary.
+
+### Issuer identity key
 
 The identity service accepts provider keys matching `^[a-z][a-z0-9._-]{0,63}$`.
 The seeds issuer and the 0x1 subscription recipient provider are both `0x1`,
 which starts with a digit, so no customer can currently link a `0x1` identity.
 Until the 0x1 identity integration chooses its provider key, seeds orders
 cannot resolve a recipient, and they fail with `recipient_identity_unavailable`.
+Changing the pattern alone is not enough: the link between a market customer
+and their issuer subject must itself be verified by the issuer.

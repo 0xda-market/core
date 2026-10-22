@@ -119,6 +119,25 @@ class IssuerOrdersTest < Minitest::Test
                  @orders.events(order.id).map { |event| [event.from_status, event.to_status, event.actor] }
   end
 
+  def test_fulfil_replay_requires_the_same_complete_confirmation
+    order, = create_order
+    @orders.claim(order.id, issuer: ISSUER)
+    fulfilled = fulfil(order)
+
+    [
+      -> { fulfil(order, amount_minor: 1) },
+      -> { fulfil(order, recipient_subject: "bond-2") },
+      lambda do
+        @orders.fulfil(order.id, issuer: ISSUER, reference: "debit-1", amount_minor: order.amount_minor,
+                                 denomination: "gems", recipient_subject: order.recipient_subject)
+      end
+    ].each do |conflicting|
+      assert_equal "issuer_confirmation_mismatch", assert_raises(Core::Conflict) { conflicting.call }.code
+    end
+    assert_equal fulfilled, fulfil(order)
+    assert_equal 3, @orders.events(order.id).length
+  end
+
   def test_unclaimed_order_cannot_be_fulfilled_and_references_are_unique
     first, = create_order
     second, = create_order(key: "order-key-2")

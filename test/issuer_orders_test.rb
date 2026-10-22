@@ -65,9 +65,10 @@ class IssuerOrdersTest < Minitest::Test
       clock: @clock, id_generator: SequenceIDs.new
     )
     kernel, = build_kernel(provider: TestProvider.new(clock: @clock), clock: @clock)
-    @client = Rack::MockRequest.new(
-      ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, catalog: @catalog, issuer_orders: @orders)
-    )
+    @client_app = ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, catalog: @catalog, issuer_orders: @orders)
+    @client = customer_client(@customer.id)
+    @stranger_client = customer_client(@stranger.id)
+    @untrusted_client = Rack::MockRequest.new(@client_app)
     @issuer = Rack::MockRequest.new(
       ZeroXDA::Market::Transport::IssuerAPI.new(issuer_orders: @orders, issuer: ISSUER, token: "issuer-secret")
     )
@@ -263,7 +264,7 @@ class IssuerOrdersTest < Minitest::Test
 
     read = @client.get("/v1/issuer-orders/#{id}?actor_user_id=#{@customer.id}")
     assert_equal ["pending", 400], JSON.parse(read.body).dig("data", "attributes").values_at("status", "amount_minor")
-    assert_equal 404, @client.get("/v1/issuer-orders/#{id}?actor_user_id=#{@stranger.id}").status
+    assert_equal 404, @stranger_client.get("/v1/issuer-orders/#{id}?actor_user_id=#{@customer.id}").status
 
     attributes = JSON.parse(read.body).dig("data", "attributes")
     assert_equal "zero", attributes["recipient_subject"]
@@ -275,9 +276,30 @@ class IssuerOrdersTest < Minitest::Test
     unlinked = JSON.parse(@client.get("/v1/issuer-accounts/#{ISSUER}?actor_user_id=#{@stranger.id}").body)
     assert_equal({ "linked" => false }, unlinked.dig("data", "attributes"))
 
-    cancelled = post(@client, "/v1/issuer-orders/#{id}/cancel", { actor_user_id: @customer.id })
+    cancelled = post(@client, "/v1/issuer-orders/#{id}/cancel", {})
     assert_equal "cancelled", JSON.parse(cancelled.body).dig("data", "attributes", "status")
     assert_equal 409, post(@client, "/v1/issuer-orders", order_body(sku: "game_other_issuer")).status
+  end
+
+  def test_customer_context_cannot_be_spoofed_with_body_query_or_http_headers
+    created = post(@client, "/v1/issuer-orders", order_body)
+    assert_equal 201, created.status
+    id = JSON.parse(created.body).dig("data", "id")
+
+    # An unrelated holder of the public bearer token cannot select a customer.
+    assert_equal 401, post(@untrusted_client, "/v1/issuer-orders", order_body).status
+    assert_equal 401, @untrusted_client.get("/v1/issuer-orders/#{id}?actor_user_id=#{@customer.id}",
+                                            "HTTP_X_MARKET_VERIFIED_CUSTOMER_ID" => @customer.id).status
+    assert_equal 401, post(@untrusted_client, "/v1/issuer-orders/#{id}/cancel",
+                           { actor_user_id: @customer.id }).status
+    assert_equal 401, @untrusted_client.get("/v1/issuer-accounts/#{ISSUER}?actor_user_id=#{@customer.id}").status
+
+    # A verified stranger remains a stranger even when all request params impersonate the owner.
+    assert_equal 404, @stranger_client.get("/v1/issuer-orders/#{id}?actor_user_id=#{@customer.id}").status
+    assert_equal 404, post(@stranger_client, "/v1/issuer-orders/#{id}/cancel",
+                           { actor_user_id: @customer.id }).status
+    assert_equal 409, post(@stranger_client, "/v1/issuer-orders", order_body).status
+    assert_equal "pending", @orders.find_for_customer(id, customer_user_id: @customer.id).status
   end
 
   def test_issuer_api_requires_its_token_and_drives_the_order
@@ -324,6 +346,14 @@ class IssuerOrdersTest < Minitest::Test
 
   def order_body(sku: "game_special")
     { actor_user_id: @customer.id, sku: sku, denomination: "seeds", idempotency_key: "order-key-1" }
+  end
+
+  def customer_client(user_id)
+    app = @client_app
+    Rack::MockRequest.new(lambda do |env|
+      env["zero_x_da.market.verified_customer_id"] = user_id
+      app.call(env)
+    end)
   end
 
   def confirmation(amount_minor: 400)

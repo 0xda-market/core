@@ -73,7 +73,7 @@ The metadata marker `purchase.fulfillment = "not_configured"` is
 descriptive staging information, **not an implemented runtime checkout
 guard**. The actual hard purchase gate while staging is `status=inactive`.
 
-Telegram category rendering may opt into `GET /v1/products?preview_0x1=true`.
+A channel adapter may opt into `GET /v1/products?preview_0x1=true`.
 Only staged inactive 0x1 products are added to the authenticated catalog response,
 with `preview: true`, `available: false` and `price: null`. The ordinary
 `/v1/products` and checkout routes remain unchanged. Other inactive products

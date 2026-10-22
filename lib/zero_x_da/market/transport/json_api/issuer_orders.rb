@@ -41,7 +41,7 @@ module ZeroXDA
           # The issuer subject stays private; the channel gets only the public
           # handle to show, or linked: false to offer signing in with the issuer.
           def issuer_account_status(request, issuer:)
-            status = @issuer_orders.account_status(customer_user_id: request.params["actor_user_id"], issuer: issuer)
+            status = @issuer_orders.account_status(customer_user_id: verified_customer_id(request), issuer: issuer)
             resource_response(
               200,
               { "type" => "issuer_account", "id" => issuer,

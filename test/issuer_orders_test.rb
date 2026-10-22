@@ -273,7 +273,7 @@ class IssuerOrdersTest < Minitest::Test
     status = JSON.parse(@client.get("/v1/issuer-accounts/#{ISSUER}?actor_user_id=#{@customer.id}").body)
     assert_equal({ "linked" => true, "pub_dress" => "zero", "provider" => "channel.example" },
                  status.dig("data", "attributes"))
-    unlinked = JSON.parse(@client.get("/v1/issuer-accounts/#{ISSUER}?actor_user_id=#{@stranger.id}").body)
+    unlinked = JSON.parse(@stranger_client.get("/v1/issuer-accounts/#{ISSUER}").body)
     assert_equal({ "linked" => false }, unlinked.dig("data", "attributes"))
 
     cancelled = post(@client, "/v1/issuer-orders/#{id}/cancel", {})
@@ -299,6 +299,8 @@ class IssuerOrdersTest < Minitest::Test
     assert_equal 404, post(@stranger_client, "/v1/issuer-orders/#{id}/cancel",
                            { actor_user_id: @customer.id }).status
     assert_equal 409, post(@stranger_client, "/v1/issuer-orders", order_body.merge(actor_user_id: @customer.id)).status
+    spoofed = @stranger_client.get("/v1/issuer-accounts/#{ISSUER}?actor_user_id=#{@customer.id}")
+    assert_equal({ "linked" => false }, JSON.parse(spoofed.body).dig("data", "attributes"))
     assert_equal "pending", @orders.find_for_customer(id, customer_user_id: @customer.id).status
   end
 

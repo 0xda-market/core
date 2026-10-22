@@ -136,7 +136,7 @@ class RuntimeTest < Minitest::Test
 
     with_environment(base.merge("DEPLOY_ENV" => "development", "ENABLE_ISSUER_ORDER_ROUTES" => "1")) do
       app = Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__))
-      assert_equal "not_found", issuer_account_error(app)
+      assert_equal "unauthorized", issuer_account_error(app)
     end
 
     with_environment(base.merge("DEPLOY_ENV" => "production", "DATABASE_URL" => "postgresql://unused",
@@ -193,7 +193,7 @@ class RuntimeTest < Minitest::Test
   end
 
   # The error code for an account-status request by an unknown user:
-  # route_not_found when the routes are off, not_found for the user otherwise.
+  # route_not_found when disabled, unauthorized without a verified customer otherwise.
   def issuer_account_error(app)
     response = Rack::MockRequest.new(app).get("/v1/issuer-accounts/issuer.example?actor_user_id=unknown",
                                               "HTTP_AUTHORIZATION" => "Bearer client-secret")

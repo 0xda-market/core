@@ -16,7 +16,9 @@ module ZeroXDA
         end
 
         def supports?(provider)
-          @providers.include?(provider)
+          # An unconfigured directory is unavailable for every channel; it
+          # must never masquerade as an issuer that says "not linked".
+          !@available || @providers.include?(provider)
         end
 
         def bind(provider, provider_user_id, pub_dress)

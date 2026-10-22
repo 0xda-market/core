@@ -20,6 +20,14 @@ module ZeroXDA
           @store.list_products(status: "active", locale: locale, marketable: true)
         end
 
+        # Only the staged 0x1 subscriptions may be previewed before launch.
+        # This does not change the sellable catalog or make them purchasable.
+        def staged_0x1_subscriptions(locale: DEFAULT_LOCALE)
+          @store.list_products(status: nil, locale: locale, marketable: true).select do |product|
+            product.status == "inactive" && product.metadata["family"] == "0x1_subscription"
+          end
+        end
+
         # Currency products; their current price is the exchange rate.
         def currencies(locale: DEFAULT_LOCALE)
           @store.list_products(status: "active", locale: locale, marketable: false)

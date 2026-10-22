@@ -73,6 +73,13 @@ The metadata marker `purchase.fulfillment = "not_configured"` is
 descriptive staging information, **not an implemented runtime checkout
 guard**. The actual hard purchase gate while staging is `status=inactive`.
 
+A channel adapter may opt into `GET /v1/products?preview_0x1=true`.
+Only staged inactive 0x1 products are added to the authenticated catalog response,
+with `preview: true`, `available: false` and `price: null`. The ordinary
+`/v1/products` and checkout routes remain unchanged. Other inactive products
+are never exposed. The channel adapter must use a non-purchasing callback for
+preview-only rows.
+
 Before activating any SKU:
 1. Resolve the authenticated Bond identity and recipient-bound contract,
    period overlaps, upgrades, refunds, expiration and revocation.

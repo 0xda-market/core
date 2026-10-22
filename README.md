@@ -350,21 +350,17 @@ CI runs:
 
 ## Deployment
 
-The VPS is the canonical runtime:
+Development is deployed **manually via `aiaiaiai-org/infra`** after successful
+Full CI for the exact `master` commit. The Core repository publishes one
+immutable GHCR image; infra deploys the private API plus separate FX and market
+price workers on `edge-prod-1` with encrypted per-workload credentials.
+No application SSH credentials are stored in Core. Production release migration
+is intentionally not activated by this workflow.
 
-- after green CI, `master` stages or refreshes `development`;
-- the shared edge serves `https://0xda-market.nilx.one` and routes channel paths
-to their adapter services over the private network;
-- active refreshes are health-gated and attempt to restart the previous release
-  on failure;
-- production directories remain reserved, but production deployment is not
-  enabled by the current automatic workflows;
-- environment switches, webhook changes, DNS changes and retirement of the old
-  host remain separate reviewed operations.
-
-See [`deploy/vps/README.md`](deploy/vps/README.md) for deployment setup and
-[`deploy/vps/OPERATIONS.md`](deploy/vps/OPERATIONS.md) for reboot verification,
-HTTPS, health, logs, backups and rollback.
+See [`docs/deployment/infra-development.md`](docs/deployment/infra-development.md)
+for setup, rollout, secret handling and verification. Legacy VPS instructions
+in [`deploy/vps/README.md`](deploy/vps/README.md) are retained for historical
+reference and must not be used for new development deployments.
 
 ## Versioning
 

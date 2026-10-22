@@ -287,7 +287,7 @@ class IssuerOrdersTest < Minitest::Test
     id = JSON.parse(created.body).dig("data", "id")
 
     # An unrelated holder of the public bearer token cannot select a customer.
-    assert_equal 401, post(@untrusted_client, "/v1/issuer-orders", order_body).status
+    assert_equal 401, post(@untrusted_client, "/v1/issuer-orders", order_body.merge(actor_user_id: @customer.id)).status
     assert_equal 401, @untrusted_client.get("/v1/issuer-orders/#{id}?actor_user_id=#{@customer.id}",
                                             "HTTP_X_MARKET_VERIFIED_CUSTOMER_ID" => @customer.id).status
     assert_equal 401, post(@untrusted_client, "/v1/issuer-orders/#{id}/cancel",
@@ -298,7 +298,7 @@ class IssuerOrdersTest < Minitest::Test
     assert_equal 404, @stranger_client.get("/v1/issuer-orders/#{id}?actor_user_id=#{@customer.id}").status
     assert_equal 404, post(@stranger_client, "/v1/issuer-orders/#{id}/cancel",
                            { actor_user_id: @customer.id }).status
-    assert_equal 409, post(@stranger_client, "/v1/issuer-orders", order_body).status
+    assert_equal 409, post(@stranger_client, "/v1/issuer-orders", order_body.merge(actor_user_id: @customer.id)).status
     assert_equal "pending", @orders.find_for_customer(id, customer_user_id: @customer.id).status
   end
 
@@ -345,7 +345,7 @@ class IssuerOrdersTest < Minitest::Test
   end
 
   def order_body(sku: "game_special")
-    { actor_user_id: @customer.id, sku: sku, denomination: "seeds", idempotency_key: "order-key-1" }
+    { sku: sku, denomination: "seeds", idempotency_key: "order-key-1" }
   end
 
   def customer_client(user_id)

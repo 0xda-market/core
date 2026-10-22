@@ -112,6 +112,23 @@ class IssuerOrdersTest < Minitest::Test
     assert_equal "issuer_account_unlinked", error.code
   end
 
+  def test_unconfigured_directory_never_reports_an_unlinked_issuer_account
+    # This is exactly the no-ISSUER_DIRECTORY_* configuration in config.ru.
+    down = ZeroXDA::Market::IssuerOrders::MemoryDirectory.new(available: false)
+    orders = ZeroXDA::Market::IssuerOrders::Service.new(
+      store: @store, denominations: @denominations, users: @identity_store, directory: down, clock: @clock
+    )
+    assert_equal "issuer_unavailable",
+                 assert_raises(Core::ProviderFailure) {
+                   orders.account_status(customer_user_id: @customer.id, issuer: ISSUER)
+                 }.code
+    assert_equal "issuer_unavailable",
+                 assert_raises(Core::ProviderFailure) {
+                   orders.create(customer_user_id: @customer.id, sku: "game_special", denomination: "seeds",
+                                 idempotency_key: "order-key-1")
+                 }.code
+  end
+
   def test_an_unavailable_directory_is_never_read_as_unlinked
     down = ZeroXDA::Market::IssuerOrders::MemoryDirectory.new(available: false, providers: %w[channel.example])
     orders = ZeroXDA::Market::IssuerOrders::Service.new(

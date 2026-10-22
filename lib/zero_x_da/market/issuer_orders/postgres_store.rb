@@ -3,7 +3,6 @@
 require "json"
 require "sequel"
 require_relative "../core/contracts"
-require_relative "account_link"
 require_relative "order"
 
 module ZeroXDA
@@ -20,7 +19,6 @@ module ZeroXDA
           @database = database.connection
           @orders = @database[Sequel.qualify(:market, :issuer_orders)]
           @events = @database[Sequel.qualify(:market, :issuer_order_events)]
-          @links = @database[Sequel.qualify(:market, :issuer_account_links)]
         end
 
         # Returns [order, created]. A repeated idempotency key returns the
@@ -84,31 +82,6 @@ module ZeroXDA
                  .limit(limit)
                  .all
                  .map { |row| deserialize(row) }
-        end
-
-        # Replaces the link for one channel account, keeping its first
-        # linked_at. Another channel account of the same provider already bound
-        # to that issuer account is a conflict.
-        def upsert_link(link)
-          row = @links
-            .insert_conflict(target: %i[issuer provider provider_user_id],
-                             update: { subject: Sequel[:excluded][:subject], pub_dress: Sequel[:excluded][:pub_dress],
-                                       updated_at: Sequel[:excluded][:updated_at] })
-            .returning
-            .insert(link.to_h)
-            .first
-          AccountLink.new(**row.slice(*link.to_h.keys))
-        rescue Sequel::UniqueConstraintViolation
-          raise AccountLink.conflict(link)
-        end
-
-        def delete_link(issuer:, provider:, provider_user_id:)
-          @links.where(issuer: issuer, provider: provider, provider_user_id: provider_user_id).delete == 1
-        end
-
-        def find_link(issuer:, provider:, provider_user_id:)
-          row = @links.where(issuer: issuer, provider: provider, provider_user_id: provider_user_id).first
-          row && AccountLink.new(**row)
         end
 
         def events(order_id)

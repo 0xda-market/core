@@ -10,6 +10,7 @@ require "zero_x_da/market/denominations/postgres_store"
 require "zero_x_da/market/denominations/service"
 require "zero_x_da/market/identity/postgres_store"
 require "zero_x_da/market/identity/service"
+require "zero_x_da/market/issuer_orders/memory_directory"
 require "zero_x_da/market/issuer_orders/postgres_store"
 require "zero_x_da/market/issuer_orders/service"
 
@@ -30,8 +31,9 @@ class PostgresIssuerOrdersTest < Minitest::Test
     @denominations = ZeroXDA::Market::Denominations::Service.new(
       store: ZeroXDA::Market::Denominations::PostgresStore.new(database: @database), catalog: catalog
     )
+    @directory = ZeroXDA::Market::IssuerOrders::MemoryDirectory.new({}, providers: %w[channel.example])
     @orders = ZeroXDA::Market::IssuerOrders::Service.new(store: @store, denominations: @denominations,
-                                                         users: @identity_store)
+                                                         users: @identity_store, directory: @directory)
   end
 
   def teardown
@@ -42,7 +44,7 @@ class PostgresIssuerOrdersTest < Minitest::Test
     within_fixture do |customer|
       order, created = create_order(customer)
       assert created
-      assert_equal [400, "0x1", "bond-#{customer.id}"], [order.amount_minor, order.issuer, order.recipient_subject]
+      assert_equal [400, "0x1", "fixture-#{customer.id[0, 8]}"], [order.amount_minor, order.issuer, order.recipient_subject]
 
       replay, replay_created = create_order(customer)
       refute replay_created
@@ -106,33 +108,12 @@ class PostgresIssuerOrdersTest < Minitest::Test
     end
   end
 
-  def test_links_follow_the_issuers_binding_rules
-    within_fixture do |customer|
-      link = @store.find_link(issuer: "0x1", provider: "channel.example",
-                              provider_user_id: @connection[Sequel.qualify(:market, :user_identities)]
-                                .where(user_id: customer.id).get(:provider_user_id))
-      renamed = @orders.link_account(issuer: "0x1", provider: link.provider, provider_user_id: link.provider_user_id,
-                                     subject: link.subject, pub_dress: "renamed")
-      assert_equal ["renamed", link.linked_at], [renamed.pub_dress, renamed.linked_at]
-
-      error = assert_raises(Core::Conflict) do
-        @connection.transaction(savepoint: true) do
-          @orders.link_account(issuer: "0x1", provider: "channel.example", provider_user_id: SecureRandom.uuid,
-                               subject: link.subject, pub_dress: "thief")
-        end
-      end
-      assert_equal "issuer_account_link_conflict", error.code
-
-      assert @orders.unlink_account(issuer: "0x1", provider: link.provider, provider_user_id: link.provider_user_id)
-      assert_equal "issuer_account_unlinked", assert_raises(Core::Conflict) { create_order(customer) }.code
-    end
-  end
-
   def test_queue_cursor_reaches_every_order_with_equal_timestamps
     within_fixture do |customer|
       clock_time = Time.utc(2026, 10, 22, 12, 0, 0)
       orders = ZeroXDA::Market::IssuerOrders::Service.new(store: @store, denominations: @denominations,
-                                                          users: @identity_store, clock: -> { clock_time })
+                                                          users: @identity_store, directory: @directory,
+                                                          clock: -> { clock_time })
       ids = 5.times.map do |index|
         orders.create(customer_user_id: customer.id, sku: "issuer_order_fixture", denomination: "seeds",
                       idempotency_key: "same-time-#{index}").first.id
@@ -175,8 +156,7 @@ class PostgresIssuerOrdersTest < Minitest::Test
       identities = ZeroXDA::Market::Identity::Service.new(store: @identity_store)
       channel_user_id = SecureRandom.uuid
       user = identities.authenticate(provider: "channel.example", provider_user_id: channel_user_id).user
-      @orders.link_account(issuer: "0x1", provider: "channel.example", provider_user_id: channel_user_id,
-                           subject: "bond-#{user.id}", pub_dress: "fixture-#{user.id[0, 8]}")
+      @directory.bind("channel.example", channel_user_id, "fixture-#{user.id[0, 8]}")
       yield user
     end
   end

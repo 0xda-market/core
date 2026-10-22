@@ -10,6 +10,7 @@ require "zero_x_da/market/denominations/memory_store"
 require "zero_x_da/market/denominations/service"
 require "zero_x_da/market/identity/memory_store"
 require "zero_x_da/market/identity/service"
+require "zero_x_da/market/issuer_orders/memory_directory"
 require "zero_x_da/market/issuer_orders/memory_store"
 require "zero_x_da/market/issuer_orders/service"
 require "zero_x_da/market/transport/issuer_api"
@@ -56,12 +57,13 @@ class IssuerOrdersTest < Minitest::Test
     @stranger = identities.authenticate(provider: "channel.example", provider_user_id: "200").user
 
     @store = ZeroXDA::Market::IssuerOrders::MemoryStore.new
-    @orders = ZeroXDA::Market::IssuerOrders::Service.new(
-      store: @store, denominations: @denominations, users: @identity_store, clock: @clock,
-      id_generator: SequenceIDs.new
+    @directory = ZeroXDA::Market::IssuerOrders::MemoryDirectory.new(
+      { ["channel.example", "100"] => "zero" }, providers: %w[channel.example other.example]
     )
-    @orders.link_account(issuer: ISSUER, provider: "channel.example", provider_user_id: "100",
-                         subject: "bond-1", pub_dress: "zero")
+    @orders = ZeroXDA::Market::IssuerOrders::Service.new(
+      store: @store, denominations: @denominations, users: @identity_store, directory: @directory,
+      clock: @clock, id_generator: SequenceIDs.new
+    )
     kernel, = build_kernel(provider: TestProvider.new(clock: @clock), clock: @clock)
     @client = Rack::MockRequest.new(
       ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, catalog: @catalog, issuer_orders: @orders)
@@ -74,7 +76,7 @@ class IssuerOrdersTest < Minitest::Test
   def test_order_snapshots_price_and_the_customers_own_issuer_account
     order, created = create_order
     assert created
-    assert_equal ["pending", 400, "seeds", ISSUER, "bond-1"],
+    assert_equal ["pending", 400, "seeds", ISSUER, "zero"],
                  [order.status, order.amount_minor, order.denomination, order.issuer, order.recipient_subject]
 
     @clock.advance(60)
@@ -87,7 +89,7 @@ class IssuerOrdersTest < Minitest::Test
 
   def test_order_records_which_channel_account_selected_the_recipient
     order, = create_order
-    assert_equal ["channel.example", "100", "bond-1"],
+    assert_equal ["channel.example", "100", "zero"],
                  [order.link_provider, order.link_provider_user_id, order.recipient_subject]
   end
 
@@ -97,25 +99,32 @@ class IssuerOrdersTest < Minitest::Test
     assert_equal({ linked: false, issuer: ISSUER }, @orders.account_status(customer_user_id: @stranger.id, issuer: ISSUER))
   end
 
-  def test_relinking_updates_the_handle_and_unlinking_stops_new_orders
-    first = @store.find_link(issuer: ISSUER, provider: "channel.example", provider_user_id: "100")
-    @clock.advance(60)
-    renamed = @orders.link_account(issuer: ISSUER, provider: "channel.example", provider_user_id: "100",
-                                   subject: "bond-1", pub_dress: "zero-renamed")
-    assert_equal ["zero-renamed", first.linked_at, @clock.call], [renamed.pub_dress, renamed.linked_at, renamed.updated_at]
-
-    assert @orders.unlink_account(issuer: ISSUER, provider: "channel.example", provider_user_id: "100")
-    refute @orders.unlink_account(issuer: ISSUER, provider: "channel.example", provider_user_id: "100")
-    assert_equal "issuer_account_unlinked", assert_raises(Core::Conflict) { create_order }.code
+  def test_a_withdrawn_binding_stops_new_orders
+    @directory = ZeroXDA::Market::IssuerOrders::MemoryDirectory.new({}, providers: %w[channel.example])
+    orders = ZeroXDA::Market::IssuerOrders::Service.new(
+      store: @store, denominations: @denominations, users: @identity_store, directory: @directory, clock: @clock
+    )
+    error = assert_raises(Core::Conflict) do
+      orders.create(customer_user_id: @customer.id, sku: "game_special", denomination: "seeds",
+                    idempotency_key: "order-key-1")
+    end
+    assert_equal "issuer_account_unlinked", error.code
   end
 
-  def test_one_issuer_account_holds_one_channel_account_per_provider
-    error = assert_raises(Core::Conflict) do
-      @orders.link_account(issuer: ISSUER, provider: "channel.example", provider_user_id: "200",
-                           subject: "bond-1", pub_dress: "zero")
+  def test_an_unavailable_directory_is_never_read_as_unlinked
+    down = ZeroXDA::Market::IssuerOrders::MemoryDirectory.new(available: false, providers: %w[channel.example])
+    orders = ZeroXDA::Market::IssuerOrders::Service.new(
+      store: @store, denominations: @denominations, users: @identity_store, directory: down, clock: @clock
+    )
+    [
+      -> { orders.account_status(customer_user_id: @customer.id, issuer: ISSUER) },
+      lambda do
+        orders.create(customer_user_id: @customer.id, sku: "game_special", denomination: "seeds",
+                      idempotency_key: "order-key-1")
+      end
+    ].each do |call|
+      assert_equal "issuer_unavailable", assert_raises(Core::ProviderFailure) { call.call }.code
     end
-    assert_equal "issuer_account_link_conflict", error.code
-    assert_nil @store.find_link(issuer: ISSUER, provider: "channel.example", provider_user_id: "200")
   end
 
   def test_channel_accounts_linked_to_different_issuer_accounts_are_ambiguous
@@ -124,8 +133,7 @@ class IssuerOrdersTest < Minitest::Test
                                                       provider: "other.example", provider_user_id: "100",
                                                       created_at: @clock.call)
     )
-    @orders.link_account(issuer: ISSUER, provider: "other.example", provider_user_id: "100",
-                         subject: "bond-2", pub_dress: "other")
+    @directory.bind("other.example", "100", "other")
 
     assert_equal "recipient_ambiguous", assert_raises(Core::Conflict) { create_order }.code
     assert_equal "recipient_ambiguous",
@@ -257,7 +265,9 @@ class IssuerOrdersTest < Minitest::Test
     assert_equal ["pending", 400], JSON.parse(read.body).dig("data", "attributes").values_at("status", "amount_minor")
     assert_equal 404, @client.get("/v1/issuer-orders/#{id}?actor_user_id=#{@stranger.id}").status
 
-    refute JSON.parse(read.body).dig("data", "attributes").key?("recipient_subject")
+    attributes = JSON.parse(read.body).dig("data", "attributes")
+    assert_equal "zero", attributes["recipient_subject"]
+    refute attributes.key?("link_provider_user_id")
 
     status = JSON.parse(@client.get("/v1/issuer-accounts/#{ISSUER}?actor_user_id=#{@customer.id}").body)
     assert_equal({ "linked" => true, "pub_dress" => "zero", "provider" => "channel.example" },
@@ -288,15 +298,6 @@ class IssuerOrdersTest < Minitest::Test
     assert_equal "fulfilled", JSON.parse(fulfilled.body).dig("data", "attributes", "status")
     assert_equal 404, @issuer.get("/v1/orders/#{id}/unknown", auth).status
 
-    linked = @issuer.put("/v1/account-links", auth.merge("CONTENT_TYPE" => "application/json",
-                                                         input: JSON.generate(provider: "channel.example",
-                                                                              provider_user_id: "200",
-                                                                              subject: "bond-2", pub_dress: "two")))
-    assert_equal 200, linked.status, linked.body
-    assert_equal "two", JSON.parse(linked.body).dig("data", "attributes", "pub_dress")
-    removed = @issuer.delete("/v1/account-links?provider=channel.example&provider_user_id=200", auth)
-    assert JSON.parse(removed.body).dig("meta", "removed")
-    assert_equal 401, @issuer.delete("/v1/account-links?provider=channel.example&provider_user_id=100").status
     assert_equal 400, post(@issuer, "/v1/orders/#{id}/reject", {}, auth).status
   end
 
@@ -326,7 +327,7 @@ class IssuerOrdersTest < Minitest::Test
   end
 
   def confirmation(amount_minor: 400)
-    { issuer_reference: "debit-1", amount_minor: amount_minor, denomination: "seeds", recipient_subject: "bond-1" }
+    { issuer_reference: "debit-1", amount_minor: amount_minor, denomination: "seeds", recipient_subject: "zero" }
   end
 
   def auth

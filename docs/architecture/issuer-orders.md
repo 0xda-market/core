@@ -42,36 +42,44 @@ pending ──claim──▶ processing ──fulfil──▶ fulfilled
 Every transition is idempotent for the same input, uses optimistic locking, and
 appends an event to `market.issuer_order_events`, which is append-only.
 
-## Recipient: issuer account links
+## Recipient: asked from the issuer
 
 The recipient is always the customer's own issuer account. The market never
-decides on its own whose account that is. The issuer tells it, through
-**account links**: an issuer-asserted binding from a channel account (for
-example a messenger account, `provider` + `provider_user_id`) to one issuer
-account (`subject`, plus its public handle `pub_dress`).
+decides on its own whose account that is, and it keeps no copy of the issuer's
+bindings. For each of the customer's channel accounts (for example a messenger
+account, `provider` + `provider_user_id`) it asks the issuer's directory which
+issuer account holds it. The issuer answers with that account's public handle
+(`pub_dress`), or that the person must sign in with the issuer to connect it.
 
 ```text
 customer --channel login--> market user + channel identity (e.g. messenger:123)
-issuer   --account link---> messenger:123 -> subject S, pub_dress "zero"
-order    --recipient------> S, snapshotted with link_provider / link_provider_user_id
+market   --lookup---------> issuer: messenger:123 -> pub_dress "zero" | sign in
+order    --recipient------> "zero", snapshotted with link_provider / link_provider_user_id
 ```
 
-- Only the issuer writes links, through its own API. A channel or customer
-  cannot create or change one.
-- Links mirror the issuer's binding rules. One channel account maps to at most
-  one issuer account. One issuer account holds at most one channel account per
-  provider. A second one is `409 issuer_account_link_conflict`, and the issuer
-  must unlink the first account itself.
+- Only the issuer knows and enforces its binding rules. One channel account
+  belongs to at most one issuer account, and one issuer account holds at most
+  one channel account per provider. The market never writes a binding.
 - The product's `metadata.purchase.recipient.provider` must equal the
   denomination's `issuer` and allow `self`.
-- No link: `409 issuer_account_unlinked`. Channel accounts that link to
+- No binding: `409 issuer_account_unlinked`. Channel accounts that belong to
   different issuer accounts: `409 recipient_ambiguous`. The market never
   guesses whose balance to debit.
-- The order snapshots `recipient_subject` and the channel account that selected
-  it (`link_provider`, `link_provider_user_id`). The issuer can therefore check
-  that the binding still holds before it debits.
-- Customer responses never include `recipient_subject` or the channel account
-  id. A channel gets only `linked` and the public `pub_dress`.
+- An issuer that cannot answer (timeout, error status, malformed body) is
+  `502 issuer_unavailable`, never "not linked". A person is never sent to link
+  an account that may already be linked.
+- The order snapshots `recipient_subject` (the `pub_dress`) and the channel
+  account that selected it (`link_provider`, `link_provider_user_id`). The
+  issuer can therefore check that the binding still holds before it debits.
+- Customer responses never include the channel account id. A channel gets
+  `linked`, and the public `pub_dress` when linked.
+
+The directory is configured with `ISSUER_DIRECTORY_URL` (HTTPS) and
+`ISSUER_DIRECTORY_TOKEN`, set together, and `ISSUER_DIRECTORY_PROVIDERS`, the
+comma-separated channel providers the issuer binds. The market `POST`s
+`{"provider","subject"}` with the bearer token and reads
+`{"state":"linked","pub_dress"}` or `{"state":"sign_in_required","provider"}`.
+Without them every lookup is `issuer_unavailable`.
 
 ### Channel flow
 
@@ -79,11 +87,11 @@ order    --recipient------> S, snapshotted with link_provider / link_provider_us
 2. If it returns `linked: true`, the channel shows the `pub_dress` and offers
    checkout in the denomination.
 3. If it returns `linked: false`, the channel offers signing in with the issuer
-   to link this channel account. The issuer's own sign-in window enforces its
+   to connect this channel account. The issuer's own sign-in window enforces its
    binding rules. For example, if the issuer account already holds another
-   account of that provider, that window says so and no link is published.
-4. After a successful link, the issuer publishes it with
-   `PUT /issuer/v1/account-links`, and the channel re-checks the status.
+   account of that provider, that window says so.
+4. After signing in, the channel re-checks the status. Nothing is published to
+   the market: the next lookup sees the new binding.
 
 ## Ordering rules
 
@@ -119,8 +127,6 @@ Issuer routes are mounted at `/issuer` only when `ISSUER_API_TOKEN` and
 | `POST /issuer/v1/orders/:id/claim` | take an order before debiting |
 | `POST /issuer/v1/orders/:id/fulfil` | `issuer_reference`, `amount_minor`, `denomination`, `recipient_subject` |
 | `POST /issuer/v1/orders/:id/reject` | `code` (`^[a-z][a-z0-9_]{1,63}$`) |
-| `PUT /issuer/v1/account-links` | `provider`, `provider_user_id`, `subject`, `pub_dress`; publish or update a link |
-| `DELETE /issuer/v1/account-links?provider=&provider_user_id=` | withdraw a link |
 
 The expected issuer loop is: poll the queue, claim, perform the atomic debit
 and grant keyed by the order `id`, then fulfil or reject.
@@ -156,11 +162,11 @@ integration test against the real channel and issuer.
 
 Customer routes take `actor_user_id` from the request. The public API is
 protected by the shared public bearer token, which identifies a trusted
-channel, not a customer. Account links narrow the risk: an order can debit only
-an issuer account that the issuer itself linked to that customer's channel
-account, and the issuer can re-check the snapshotted channel account before it
+channel, not a customer. The issuer directory narrows the risk: an order can
+debit only the issuer account that the issuer itself binds to that customer's
+channel account, and the issuer can re-check the snapshotted channel account before it
 debits. What remains is trust in the channel: a holder of the public token who
-claims to be `messenger:123` reaches the account linked to `messenger:123`.
+claims to be `messenger:123` reaches the account bound to `messenger:123`.
 
 This gate is enforced, not only documented: customer routes are off unless
 `ENABLE_ISSUER_ORDER_ROUTES=1`, and a production boot with that flag refuses to
@@ -173,6 +179,6 @@ attempt must be tested at that boundary.
 
 ### Issuer integration
 
-The issuer must implement its side of the contract: publish and withdraw
-account links whenever a binding changes, run the claim → debit+grant →
+The issuer must implement its side of the contract: answer directory
+lookups for the market's token, run the claim → debit+grant →
 fulfil/reject loop, and rehearse the recovery procedure above.

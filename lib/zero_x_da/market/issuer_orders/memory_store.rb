@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative "../core/contracts"
-require_relative "account_link"
 require_relative "order"
 
 module ZeroXDA
@@ -11,7 +10,6 @@ module ZeroXDA
         def initialize
           @orders = {}
           @events = []
-          @links = {}
           @mutex = Mutex.new
         end
 
@@ -76,30 +74,6 @@ module ZeroXDA
                    .sort_by { |order| [order.created_at, order.id] }
                    .first(limit)
           end
-        end
-
-        # Replaces the link for one channel account. Another channel account of
-        # the same provider already bound to that issuer account is a conflict.
-        def upsert_link(link)
-          @mutex.synchronize do
-            taken = @links.values.find do |other|
-              other.issuer == link.issuer && other.subject == link.subject && other.provider == link.provider &&
-                other.provider_user_id != link.provider_user_id
-            end
-            raise AccountLink.conflict(link) if taken
-
-            key = [link.issuer, link.provider, link.provider_user_id]
-            previous = @links[key]
-            @links[key] = previous ? AccountLink.new(**link.to_h, linked_at: previous.linked_at) : link
-          end
-        end
-
-        def delete_link(issuer:, provider:, provider_user_id:)
-          @mutex.synchronize { !@links.delete([issuer, provider, provider_user_id]).nil? }
-        end
-
-        def find_link(issuer:, provider:, provider_user_id:)
-          @mutex.synchronize { @links[[issuer, provider, provider_user_id]] }
         end
 
         def events(order_id)

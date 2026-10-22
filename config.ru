@@ -28,6 +28,8 @@ require_relative "lib/zero_x_da/market/pricing/service"
 require_relative "lib/zero_x_da/market/denominations/memory_store"
 require_relative "lib/zero_x_da/market/denominations/postgres_store"
 require_relative "lib/zero_x_da/market/denominations/service"
+require_relative "lib/zero_x_da/market/adapters/issuer_directory_http"
+require_relative "lib/zero_x_da/market/issuer_orders/memory_directory"
 require_relative "lib/zero_x_da/market/issuer_orders/memory_store"
 require_relative "lib/zero_x_da/market/issuer_orders/postgres_store"
 require_relative "lib/zero_x_da/market/issuer_orders/service"
@@ -62,6 +64,12 @@ issuer_api_token = ENV["ISSUER_API_TOKEN"].to_s
 issuer_api_issuer = ENV["ISSUER_API_ISSUER"].to_s
 if issuer_api_token.empty? != issuer_api_issuer.empty?
   raise "ISSUER_API_TOKEN and ISSUER_API_ISSUER must be configured together"
+end
+issuer_directory_url = ENV["ISSUER_DIRECTORY_URL"].to_s
+issuer_directory_token = ENV["ISSUER_DIRECTORY_TOKEN"].to_s
+issuer_directory_providers = ENV["ISSUER_DIRECTORY_PROVIDERS"].to_s.split(",").map(&:strip).reject(&:empty?)
+if issuer_directory_url.empty? != issuer_directory_token.empty?
+  raise "ISSUER_DIRECTORY_URL and ISSUER_DIRECTORY_TOKEN must be configured together"
 end
 # Customer issuer-order routes trust actor_user_id from the shared public
 # token, so they stay off until a verified customer boundary exists.
@@ -103,8 +111,17 @@ pricing = ZeroXDA::Market::Pricing::Service.new(store: pricing_store, catalog: c
 denomination_store = database ? ZeroXDA::Market::Denominations::PostgresStore.new(database: database) : ZeroXDA::Market::Denominations::MemoryStore.new
 denominations = ZeroXDA::Market::Denominations::Service.new(store: denomination_store, catalog: catalog, clock: clock)
 issuer_order_store = database ? ZeroXDA::Market::IssuerOrders::PostgresStore.new(database: database) : ZeroXDA::Market::IssuerOrders::MemoryStore.new
+# Without a configured directory every lookup is unavailable, never "not linked".
+issuer_directory = if issuer_directory_url.empty?
+                     ZeroXDA::Market::IssuerOrders::MemoryDirectory.new(available: false)
+                   else
+                     ZeroXDA::Market::Adapters::IssuerDirectoryHTTP.new(endpoint: issuer_directory_url,
+                                                                        token: issuer_directory_token,
+                                                                        providers: issuer_directory_providers)
+                   end
 issuer_orders = ZeroXDA::Market::IssuerOrders::Service.new(store: issuer_order_store, denominations: denominations,
-                                                           users: identity_store, clock: clock)
+                                                           users: identity_store, directory: issuer_directory,
+                                                           clock: clock)
 localization = ZeroXDA::Market::Localization::Service.new(catalog: catalog, clock: clock,
                                                           max_rate_age_seconds: Integer(ENV.fetch("FX_RATE_MAX_AGE_SECONDS", "3600")))
 manual_provider = if operator_token && !operator_token.empty?

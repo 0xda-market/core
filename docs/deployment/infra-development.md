@@ -1,7 +1,7 @@
 # Development Core deployment via Infra
 
 Core development runs privately on `edge-prod-1` over the existing
-`nilx-edge` Docker network. Only the Telegram TEST bot consumes its API;
+`nilx-edge` Docker network. Only the test client adapter consumes its API;
 there is **no public Core development hostname**.
 
 ## Ownership and rollout
@@ -11,7 +11,7 @@ there is **no public Core development hostname**.
 | Core API + database migrations | `0xda-market/core` | `market-api-development` | HTTP `/health` on port 10000 |
 | FX refresh loop | `0xda-market/core` | `market-fx-development` | Running process |
 | Market price refresh loop | `0xda-market/core` | `market-prices-development` | Running process |
-| Telegram TEST bot | `0xda-market/telegram-bot` | `market-bot-test` | HTTP `/health` on port 10000 |
+| test client adapter | `client adapter repository` | `market-bot-test` | HTTP `/health` on port 10000 |
 
 Production workloads and their PostgreSQL instance are never replaced by
 development activation. The development database must be the independent
@@ -42,9 +42,9 @@ SSH and GHCR pull credentials. It must have `GHCR_PULL_USER` and
 `GHCR_PULL_TOKEN` with `read:packages` on the Core image.
 Development Core does not use the older `SSH_*` repository credentials.
 
-`PUBLIC_API_TOKEN` **must exactly match** the Telegram bot's
+`PUBLIC_API_TOKEN` **must exactly match** the test client adapter's
 `development` Environment secret `MARKET_API_TOKEN`. Changing either
-requires reactivation of the affected workload. The Telegram webhook
+requires reactivation of the affected workload. The client adapter webhook
 secret and Bot API token are separate and are not changed by Core.
 
 The explicit contract sets development profitability defaults to 100 bps

@@ -371,3 +371,9 @@ reference and must not be used for new development deployments.
 Stable releases use Semantic Versioning tags such as `v0.1.0`. Release and
 rollback procedures are documented in [RELEASING.md](RELEASING.md), with notable
 changes curated in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+0xda-market Core is available under the [MIT License](LICENSE).
+
+© 2026 0xda-market

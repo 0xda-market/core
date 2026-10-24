@@ -18,6 +18,8 @@ module ZeroXDA
             currency = @request_parser.requested_currency(request)
             locale = @request_parser.requested_locale(request)
             products = @catalog.products(locale: locale)
+            staged = request.params["preview_0x1"] == "true" && @catalog.respond_to?(:staged_0x1_subscriptions)
+            products += @catalog.staged_0x1_subscriptions(locale: locale) if staged
             prices = @pricing ? @pricing.current_prices : {}
             executable_skus = available_executable_skus(prices)
             listed_skus = if @listings&.respond_to?(:available_skus)
@@ -33,9 +35,10 @@ module ZeroXDA
                 sku: product.sku,
                 executable_skus: executable_skus
               )
-              available = listed && !amount_usdt.nil?
-              visible_amount_usdt = amount_usdt || (price&.amount_usdt if listed)
-              present_webapp_product(
+              preview = product.status == "inactive"
+              available = !preview && listed && !amount_usdt.nil?
+              visible_amount_usdt = amount_usdt || (price&.amount_usdt if listed || preview)
+              resource = present_webapp_product(
                 product,
                 price: visible_amount_usdt && price,
                 amount_usdt: visible_amount_usdt,
@@ -43,6 +46,12 @@ module ZeroXDA
                 listed: listed,
                 available: available
               )
+              if preview
+                resource["attributes"]["preview"] = true
+                resource["attributes"]["preview_price"] = resource["attributes"].delete("price")
+                resource["attributes"]["price"] = nil
+              end
+              resource
             end
             snapshot_id = Digest::SHA256.hexdigest(JSON.generate(data))
 

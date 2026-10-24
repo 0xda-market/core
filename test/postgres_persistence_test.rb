@@ -9,6 +9,7 @@ require "zero_x_da/market/providers/manual_provider"
 require "zero_x_da/market/identity/admin_service"
 require "zero_x_da/market/identity/postgres_store"
 require "zero_x_da/market/identity/service"
+require "zero_x_da/market/identity/browser_session_store"
 require "zero_x_da/market/catalog/postgres_store"
 require "zero_x_da/market/catalog/service"
 require "zero_x_da/market/listings/postgres_store"
@@ -80,6 +81,22 @@ class PostgresPersistenceTest < Minitest::Test
     assert_equal provider.key, restarted_provider.key
   end
 
+  def test_browser_handoff_survives_restart_and_can_only_be_consumed_once
+    digest = SecureRandom.hex(32)
+    now = Time.now.to_i
+    store = ZeroXDA::Market::Identity::BrowserSessionStore.new(database: @database)
+    store.put(digest, "handoff", { "point" => "золоті" }, now + 60)
+    @database.disconnect
+    @database = connect
+    restarted = ZeroXDA::Market::Identity::BrowserSessionStore.new(database: @database)
+    assert_nil restarted.consume(digest, "session", now)
+    assert_equal({ "point" => "золоті" }, restarted.consume(digest, "handoff", now))
+    assert_nil restarted.consume(digest, "handoff", now)
+    restarted.put(digest, "session", { "seeds_authority" => "client_display" }, now + 60)
+    assert_equal "client_display", restarted.read(digest, "session", now).fetch("seeds_authority")
+    assert_nil restarted.read(digest, "session", now + 60)
+  end
+
   def test_migrations_are_idempotent
     migrate(@database)
 
@@ -100,6 +117,7 @@ class PostgresPersistenceTest < Minitest::Test
         021_normalize_0x1_seeds_identifier
         022_issuer_denominations
         023_issuer_orders
+        024_nilx_browser_sessions
       ],
       versions
     )

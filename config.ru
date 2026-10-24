@@ -170,6 +170,15 @@ public_api = ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, token: publ
                                                      broker_earnings: broker_earnings, denominations: denominations,
                                                      issuer_orders: issuer_order_routes ? issuer_orders : nil)
 applications = { "/" => public_api }
+unless ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN", "").empty?
+  raise "nilx browser handoff requires PostgreSQL" unless database
+  require_relative "lib/zero_x_da/market/identity/browser_session_store"
+  require_relative "lib/zero_x_da/market/transport/nilx_browser_api"
+  applications["/nilx-browser"] = ZeroXDA::Market::Transport::NilxBrowserAPI.new(
+    store: ZeroXDA::Market::Identity::BrowserSessionStore.new(database: database),
+    identity_service: identity_service, token: ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN")
+  )
+end
 operator_api = nil
 if manual_provider
   operator_api = ZeroXDA::Market::Transport::ManualAPI.new(provider: manual_provider, token: operator_token,

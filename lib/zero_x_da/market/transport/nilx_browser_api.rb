@@ -51,8 +51,12 @@ module ZeroXDA
             auth = @identity.authenticate(provider: "nilx", provider_user_id: context.fetch("subject"))
             session = SecureRandom.urlsafe_base64(32)
             @store.put(digest(session), "session", context.merge("market_user_id" => auth.user.id), @clock.call + 1800)
+            # The browser lands on the exact selected BusinessPoint, not the Market root.
+            # Preserve the reader-facing Kyiv slug without changing its stable point ID.
+            point = context.fetch("point")
+            path = point == "zoloti-vorota" ? "золоті" : point
             headers = {
-              "location" => "#{TARGET}/#{Rack::Utils.escape_path(context.fetch('point'))}",
+              "location" => "#{TARGET}/#{Rack::Utils.escape_path(path)}",
               "set-cookie" => "#{COOKIE}=#{session}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=1800"
             }
             response(303, {}, headers)

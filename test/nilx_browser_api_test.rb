@@ -65,7 +65,7 @@ class NilxBrowserAPITest < Minitest::Test
     code = JSON.parse(issued.body).fetch("code")
     accepted = exchange(code)
     assert_equal 303, accepted.status
-    assert_match(%r{https://0xda-market.nilx.one/}, accepted["location"])
+    assert_equal "https://0xda-market.nilx.one/#{Rack::Utils.escape_path("золоті")}", accepted["location"]
     assert_equal 401, exchange(code).status
     cookie = accepted["set-cookie"].split(";").first
     session = @client.get("/session", "HTTP_COOKIE" => cookie)
@@ -77,6 +77,14 @@ class NilxBrowserAPITest < Minitest::Test
     assert_equal [{ provider: "nilx", provider_user_id: "b" * 64 }], @calls
     @now += 1800
     assert_equal 401, @client.get("/session", "HTTP_COOKIE" => cookie).status
+  end
+
+  def test_other_selected_points_redirect_to_their_own_page
+    @context[:point] = "batkivshchyna"
+    code = JSON.parse(issue.body).fetch("code")
+    accepted = exchange(code)
+    assert_equal 303, accepted.status
+    assert_equal "https://0xda-market.nilx.one/batkivshchyna", accepted["location"]
   end
 
   def test_expired_codes_and_invalid_context_are_rejected

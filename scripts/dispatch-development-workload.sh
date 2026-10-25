@@ -6,7 +6,7 @@ umask 077
 INFRA_REPOSITORY=aiaiaiai-org/infra
 case "${WORKLOAD:-}" in
   market-api-development)
-    names=(DATABASE_URL PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN)
+    names=(DATABASE_URL PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN NILX_BROWSER_HANDOFF_TOKEN)
     ;;
   market-fx-development|market-prices-development)
     names=(DATABASE_URL)
@@ -31,6 +31,11 @@ for name in "${names[@]}"; do
     exit 1
   }
 done
+
+if [[ "$WORKLOAD" == market-api-development && ${#NILX_BROWSER_HANDOFF_TOKEN} -lt 32 ]]; then
+  echo "::error::NILX_BROWSER_HANDOFF_TOKEN must contain at least 32 characters." >&2
+  exit 1
+fi
 
 # Never let development use the self-hosted production database.
 python3 - <<'PY'

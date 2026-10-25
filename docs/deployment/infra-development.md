@@ -96,3 +96,15 @@ Do not dispatch `market-api-production` to work around development
 failures. No secret values should appear in PRs, logs or tickets.
 
 <!-- © 2026 aiaiaiai · aiaiaiai.org -->
+# Browser handoff credential
+
+The API activation requires `NILX_BROWSER_HANDOFF_TOKEN` from Actions secrets
+(repository or development Environment), with at least 32 characters. It is
+included in the API's encrypted envelope only; FX and price workers do not
+receive it. Infra must include the matching API runtime secret mapping.
+
+This workflow deploys development only. It does not provision the public
+`market-api-production` service. Production still needs a release deployment
+path and runtime contract before the browser handoff can be activated there.
+Use a distinct credential for an isolated development Identity/Market pair;
+the public Identity and production Market must share their production value.

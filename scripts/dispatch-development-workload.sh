@@ -32,9 +32,14 @@ for name in "${names[@]}"; do
   }
 done
 
-if [[ "$WORKLOAD" == market-api-development && ${#NILX_BROWSER_HANDOFF_TOKEN} -lt 32 ]]; then
-  echo "::error::NILX_BROWSER_HANDOFF_TOKEN must contain at least 32 characters." >&2
-  exit 1
+# Match NilxBrowserAPI's minimum of 32 UTF-8 bytes, not locale-dependent
+# Bash character count. Never print the value or pass it to the browser.
+if [[ "$WORKLOAD" == market-api-development ]]; then
+  token_bytes="$(printf %s "$NILX_BROWSER_HANDOFF_TOKEN" | wc -c)"
+  if (( token_bytes < 32 )); then
+    echo "::error::NILX_BROWSER_HANDOFF_TOKEN must contain at least 32 bytes." >&2
+    exit 1
+  fi
 fi
 
 # Never let development use the self-hosted production database.

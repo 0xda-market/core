@@ -174,6 +174,41 @@ class ListingsServiceTest < Minitest::Test
     end
   end
 
+  def test_issuer_supplied_digital_product_cannot_be_minted_as_human_inventory
+    digital = product(
+      "digital_subscription", marketable: true, position: 4,
+      metadata: {
+        family: "digital_subscription",
+        purchase: { recipient: { provider: "issuer.example" } },
+        supplier: { kind: "system_broker", id: "issuer.example", issuer: "issuer.example" }
+      }
+    )
+    @catalog = ZeroXDA::Market::Catalog::Service.new(
+      store: ZeroXDA::Market::Catalog::MemoryStore.new(products: [digital])
+    )
+    listings = ZeroXDA::Market::Listings::Service.new(
+      store: ZeroXDA::Market::Listings::MemoryStore.new,
+      users: @users,
+      catalog: @catalog,
+      localization: IdentityLocalization.new,
+      profitability: @profitability,
+      clock: @clock,
+      id_generator: SequenceIDs.new
+    )
+    error = assert_raises(ZeroXDA::Market::Core::Conflict) do
+      listings.create(actor_user_id: @broker.id, sku: digital.sku,
+                      quantity: "1000000", price_amount: "1", currency: "USDT")
+    end
+    assert_equal "system_supplier_requires_issuer", error.code
+
+    reservation_error = assert_raises(ZeroXDA::Market::Core::Conflict) do
+      listings.reserve(customer_user_id: @client.id, quote_id: "q1", sku: digital.sku,
+                       quantity: 1, expires_at: @clock.call + 60,
+                       client_total_price_usdt: "3")
+    end
+    assert_equal "system_supplier_requires_issuer", reservation_error.code
+  end
+
   def test_admin_inherits_broker_listing_capability
     admin = ZeroXDA::Market::Identity::AdminService.new(
       store: @users,

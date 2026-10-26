@@ -119,6 +119,7 @@ class PostgresPersistenceTest < Minitest::Test
         023_issuer_orders
         024_nilx_browser_sessions
         025_0x1_subscription_promotional_prices
+        026_0x1_system_digital_supplier
       ],
       versions
     )

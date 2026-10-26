@@ -46,6 +46,30 @@ Stable SKUs:
 `0x1_special_12m`, `0x1_exclusive_1m`, `0x1_exclusive_3m`,
 `0x1_exclusive_6m`, `0x1_exclusive_12m`.
 
+## System digital broker: 0x1
+
+The subscription product's catalog `metadata.supplier` is the typed object
+`{"kind":"system_broker","id":"0x1","issuer":"0x1"}`. It identifies the
+**non-human issuing system** that supplies the digital entitlement. It is
+not a row in `market.users`, a login identity, an ordinary human broker,
+or a fabricated finite inventory balance. The issuer key must match the
+product's authoritative `purchase.recipient.provider` identity.
+
+The market remains the **seller of record** at its catalog boundary.
+The supplier attribution is product provenance, **not** proof of completed
+fulfillment, payment acceptance, a redeemable broker listing or inventory.
+The human broker listing/reservation service explicitly rejects products
+of `kind=system_broker`; even a human admin cannot impersonate this
+system by submitting a listing.
+
+Migration 026 attaches the designation only to the eight existing
+inactive, issuer-bound 0x1 subscription SKUs when no supplier has already
+been assigned. It creates no marketplace user, listings, liquidity or
+new payable route. The future real-money system-supplier path must use
+a verified 0x1 entitlement provider and payment settlement, bind the
+recipient Bond, and commit fulfillment idempotently. **No sales become
+available through this catalog-only update.**
+
 ## Money versus game currency
 
 USDT is the market-owned sales price in the append-only

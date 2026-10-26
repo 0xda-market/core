@@ -9,9 +9,13 @@ require "zero_x_da/market/denominations/postgres_store"
 require "zero_x_da/market/denominations/service"
 
 class PostgresDenominationsTest < Minitest::Test
-  SPECIAL_SEEDS = {
+  INITIAL_SEEDS = {
     "0x1_special_1m" => 400, "0x1_special_3m" => 1020,
     "0x1_special_6m" => 1800, "0x1_special_12m" => 2400
+  }.freeze
+  CURRENT_SEEDS = {
+    "0x1_special_1m" => 640, "0x1_special_3m" => 1632,
+    "0x1_special_6m" => 2496, "0x1_special_12m" => 3840
   }.freeze
 
   def setup
@@ -43,17 +47,19 @@ class PostgresDenominationsTest < Minitest::Test
     assert_empty @connection[Sequel.qualify(:market, :product_prices)].where(sku: "seeds").all
   end
 
-  def test_staged_seed_prices_are_carried_without_touching_catalog_metadata
+  def test_original_seed_prices_remain_auditable_after_staged_promotion
     first_rows = @connection[Sequel.qualify(:market, :denomination_prices)]
       .where(denomination: "seeds", source: "core")
       .order(:id).all
       .uniq { |row| row.fetch(:sku) }
-    assert_equal SPECIAL_SEEDS, first_rows.to_h { |row| [row.fetch(:sku), row.fetch(:amount_minor)] }
+    assert_equal INITIAL_SEEDS, first_rows.to_h { |row| [row.fetch(:sku), row.fetch(:amount_minor)] }
 
-    SPECIAL_SEEDS.each do |sku, amount|
+    CURRENT_SEEDS.each do |sku, amount|
       metadata = @connection[Sequel.qualify(:market, :products)].where(sku: sku).get(:metadata)
       assert_equal({ "amount" => amount, "currency" => "seeds", "symbol" => "₴€£" }, metadata["seed_price"].to_h)
     end
+    latest = @store.latest_prices(denomination: "seeds")
+    assert_equal CURRENT_SEEDS, latest.transform_values(&:amount_minor).slice(*CURRENT_SEEDS.keys)
   end
 
   def test_backfill_skips_drifted_goods_instead_of_aborting

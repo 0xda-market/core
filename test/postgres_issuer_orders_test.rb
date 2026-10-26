@@ -1,4 +1,6 @@
 # frozen_string_literal: true
+# © 2026 aiaiaiai · aiaiaiai.org
+# SPDX-License-Identifier: MIT
 
 require_relative "test_helper"
 require "securerandom"
@@ -61,6 +63,70 @@ class PostgresIssuerOrdersTest < Minitest::Test
       assert_raises(Sequel::DatabaseError) do
         @connection.transaction(savepoint: true) { events.update(actor: "customer") }
       end
+    end
+  end
+
+  def test_staged_special_640_seeds_order_is_auditable_but_not_live
+    within_fixture do |customer|
+      special = "0x1_special_1m"
+      exclusive = "0x1_exclusive_1m"
+      key = "special-seeds-quote-check"
+      products = @connection[Sequel.qualify(:market, :products)]
+
+      assert_equal "inactive", products.where(sku: special).get(:status)
+      error = assert_raises(Core::Conflict) do
+        @orders.create(customer_user_id: customer.id, sku: special, denomination: "seeds", idempotency_key: key)
+      end
+      assert_equal "denomination_price_unavailable", error.code
+
+      # Activate only inside the rolled-back PostgreSQL test fixture.
+      # This MUST NOT publish the catalog SKU or accept a real purchase.
+      products.where(sku: special).update(status: "active")
+      order, created = @orders.create(
+        customer_user_id: customer.id, sku: special, denomination: "seeds", idempotency_key: key
+      )
+      assert created
+      assert_equal [special, 640, "seeds", "0x1", "pending"],
+                   [order.sku, order.amount_minor, order.denomination, order.issuer, order.status]
+      assert_equal "fixture-#{customer.id[0, 8]}", order.recipient_subject
+
+      @denominations.apply_prices([{ "sku" => special, "amount_minor" => 800 }], denomination: "seeds")
+      replay, replay_created = @orders.create(
+        customer_user_id: customer.id, sku: special, denomination: "seeds", idempotency_key: key
+      )
+      refute replay_created
+      assert_equal [order.id, 640, order.price_id], [replay.id, replay.amount_minor, replay.price_id]
+
+      claimed = @orders.claim(order.id, issuer: "0x1")
+      assert_equal "processing", claimed.status
+      assert_raises(Core::InvalidTransition) { @orders.cancel(order.id, customer_user_id: customer.id) }
+
+      reference = "identity-debit-#{order.id}"
+      confirm = lambda do
+        @orders.fulfil(
+          order.id, issuer: "0x1", reference: reference, amount_minor: order.amount_minor,
+          denomination: "seeds", recipient_subject: order.recipient_subject
+        )
+      end
+      fulfilled = confirm.call
+      assert_equal "fulfilled", fulfilled.status
+      assert_equal fulfilled.to_h, confirm.call.to_h
+      assert_equal %w[pending processing fulfilled], @store.events(order.id).map(&:to_status)
+      assert_equal "issuer_reference_conflict",
+                   assert_raises(Core::Conflict) {
+                     @orders.fulfil(
+                       order.id, issuer: "0x1", reference: "another-debit",
+                       amount_minor: 640, denomination: "seeds", recipient_subject: order.recipient_subject
+                     )
+                   }.code
+
+      # Even a temporarily active Exclusive has NO seeds denomination.
+      products.where(sku: exclusive).update(status: "active")
+      assert_equal "denomination_price_unavailable",
+                   assert_raises(Core::Conflict) {
+                     @orders.create(customer_user_id: customer.id, sku: exclusive,
+                                    denomination: "seeds", idempotency_key: "exclusive-seeds-check")
+                   }.code
     end
   end
 

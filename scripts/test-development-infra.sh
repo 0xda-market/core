@@ -15,6 +15,8 @@ grep -Fq 'ghcr.io/0xda-market/core:development-' "$workflow"
 grep -Fq 'secrets.DATABASE_URL' "$workflow"
 grep -Fq 'secrets.PUBLIC_API_TOKEN' "$workflow"
 grep -Fq 'secrets.MANUAL_PROVIDER_TOKEN' "$workflow"
+grep -Fq 'secrets.NILX_BROWSER_HANDOFF_TOKEN' "$workflow"
+grep -Fq 'names=(DATABASE_URL PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN NILX_BROWSER_HANDOFF_TOKEN)' "$script"
 grep -Fq 'secrets.INFRA_DEPLOY_TOKEN' "$workflow"
 ! grep -Eq '\bSSH_(HOST|USER|PRIVATE_KEY)\b' "$workflow"
 

@@ -90,6 +90,7 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       PUBLIC_API_TOKEN: ${{ secrets.PUBLIC_API_TOKEN }}
       MANUAL_PROVIDER_TOKEN: ${{ secrets.MANUAL_PROVIDER_TOKEN }}
+      NILX_BROWSER_HANDOFF_TOKEN: ${{ secrets.NILX_BROWSER_HANDOFF_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:

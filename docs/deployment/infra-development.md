@@ -95,4 +95,21 @@ its own reviewed Infra contract and explicit activation are approved.
 Do not dispatch `market-api-production` to work around development
 failures. No secret values should appear in PRs, logs or tickets.
 
+## Browser handoff credential
+
+The API activation requires `NILX_BROWSER_HANDOFF_TOKEN` from Actions secrets
+(repository or development Environment), with at least 32 characters. It is
+included in the API's encrypted envelope only; FX and price workers do not
+receive it. Infra must include the matching API runtime secret mapping.
+
+This workflow deploys development only. It does not provision the public
+`market-api-production` service. Production still needs a release deployment
+path and runtime contract before the browser handoff can be activated there.
+The current browser journey uses the **live** `https://nilx.one` Identity
+and the **Market development** API. Their producer secrets
+(`nilx-one/web` `production` and `0xda-market/core` `development`)
+therefore **must contain the same random token**. Do not rotate either
+one independently. Keep the Market database isolated to the test Supabase
+project, keep purchase routes disabled, and do not deploy Market production.
+
 <!-- © 2026 aiaiaiai · aiaiaiai.org -->

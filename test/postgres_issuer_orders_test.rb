@@ -110,7 +110,7 @@ class PostgresIssuerOrdersTest < Minitest::Test
       end
       fulfilled = confirm.call
       assert_equal "fulfilled", fulfilled.status
-      assert_equal fulfilled, confirm.call
+      assert_equal fulfilled.to_h, confirm.call.to_h
       assert_equal %w[pending processing fulfilled], @store.events(order.id).map(&:to_status)
       assert_equal "issuer_reference_conflict",
                    assert_raises(Core::Conflict) {

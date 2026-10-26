@@ -6,10 +6,40 @@ BondChain. They are not third-party subscription resales.
 
 | Duration | Special (USDT) | Special (seeds ₴€£) | Exclusive (USDT) |
 | --- | ---: | ---: | ---: |
-| 1 month | 2.49 | 400 | 5.49 |
-| 3 months | 6.29 | 1,020 | 13.99 |
-| 6 months | 11.49 | 1,800 | 24.49 |
-| 12 months | 14.99 | 2,400 | 32.99 |
+| 1 month | 2.49 | 640 | 4.99 |
+| 3 months | 6.29 | 1,632 | 12.69 |
+| 6 months | 9.69 | 2,496 | 19.49 |
+| 12 months | 14.99 | 3,840 | 29.99 |
+
+### Subscription term promotional price
+
+The approved monthly bases are **Special 2.49 USDT**, **Exclusive 4.98 USDT**
+(2 × Special), and **Special 640 seeds**. The nominal duration discounts are
+0% (1 month), 15% (3), 35% (6), and 50% (12), identical for both tiers.
+Calculate each USDT raw term amount using exact decimal arithmetic, then
+choose the nearest positive allowed cent ending **.29, .49, .69 or .99**;
+ties favor the lower buyer price. The system does not round each month's
+price separately, and it does not reapply the discount after promotion.
+
+The generic `Pricing::TermPromotionPolicy` accepts the monthly base,
+duration, discount basis points and allowed endings as **inputs**, not
+provider-specific defaults. These numbers are this catalog's data.
+For example, Special 3m: 2.49 × 3 × 0.85 = 6.3495 → **6.29 USDT**;
+Special 12m: 2.49 × 12 × 0.5 = 14.94 → **14.99 USDT**.
+Consequently the displayed *nominal* 50% discount may be slightly different
+from the effective discount. If offering a legally precise percentage,
+display the effective ratio instead. The Exclusive promotional output may
+differ from exactly twice the final Special price; its **undiscounted monthly
+anchor** is exactly 2× Special.
+
+**This is not client FX rounding.** Unlike the upward-only currency
+presentation rule, the promotion may adjust a USDT term price either up
+or down before it is appended to `market.product_prices`. The price
+history is append-only: migration 025 adds only changed introductory
+prices to untouched system-owned **inactive** SKUs, never rewriting a
+user/admin-set quote or an existing price record. The target seeds prices
+are separate exact integers and use no promotion/FX. Exclusive remains
+**USDT-only** with no seeds denomination price.
 
 Stable SKUs:
 `0x1_special_1m`, `0x1_special_3m`, `0x1_special_6m`,

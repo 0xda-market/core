@@ -112,14 +112,14 @@ rm -f "$source_file"
 deploy_runs="repos/$INFRA_REPOSITORY/actions/workflows/deploy-workload.yml/runs"
 deploy_baseline="$(gh api --method GET "$deploy_runs?event=repository_dispatch&per_page=1" --jq '.workflow_runs[0].id // 0')"
 [[ "$deploy_baseline" =~ ^[0-9]+$ ]]
-jq -nc --arg workload "$WORKLOAD" --arg image "$IMAGE_REF" --rawfile secrets_age "$encrypted_file" '
+jq -nc --arg workload "$WORKLOAD" --arg image "$IMAGE_REF" --arg request_id "$GITHUB_RUN_ID" --rawfile secrets_age "$encrypted_file" '
   {event_type: "deploy-workload", client_payload:
-    {workload: $workload, image: $image, secrets_age: $secrets_age}}
+    {workload: $workload, image: $image, secrets_age: $secrets_age, request_id: $request_id}}
 ' | gh api --method POST "repos/$INFRA_REPOSITORY/dispatches" --input -
 
 # The product job must wait for infra to finish. API migration/health is a
 # hard prerequisite before the worker matrix can start.
-title="Deploy $WORKLOAD"
+title="Deploy $WORKLOAD / $GITHUB_RUN_ID"
 deploy_run=""
 for attempt in $(seq 1 90); do
   response="$(gh api --method GET "$deploy_runs?event=repository_dispatch&per_page=100")"

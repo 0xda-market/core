@@ -1,8 +1,14 @@
 # © 2026 aiaiaiai · aiaiaiai.org
 name: Deploy development via infra
+run-name: Deploy Market Core ${{ inputs.request_id || github.sha }}
 
 on:
   workflow_dispatch:
+    inputs:
+      request_id:
+        description: Optional stack deployment correlation ID
+        required: false
+        type: string
 
 permissions:
   contents: read

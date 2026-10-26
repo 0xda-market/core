@@ -10,12 +10,12 @@ require "zero_x_da/market/catalog/service"
 class Ox1SubscriptionCatalogTest < Minitest::Test
   PRICES = {
     "special" => {
-      1 => ["2.49", 400], 3 => ["6.29", 1020],
-      6 => ["11.49", 1800], 12 => ["14.99", 2400]
+      1 => ["2.49", 640], 3 => ["6.29", 1632],
+      6 => ["9.69", 2496], 12 => ["14.99", 3840]
     },
     "exclusive" => {
-      1 => ["5.49", nil], 3 => ["13.99", nil],
-      6 => ["24.49", nil], 12 => ["32.99", nil]
+      1 => ["4.99", nil], 3 => ["12.69", nil],
+      6 => ["19.49", nil], 12 => ["29.99", nil]
     }
   }.freeze
 
@@ -62,12 +62,27 @@ class Ox1SubscriptionCatalogTest < Minitest::Test
 
         history = @database.connection[Sequel.qualify(:market, :product_prices)]
                            .where(sku: sku).order(Sequel.desc(:id)).all
-        assert_equal 1, history.size, sku
+        assert_operator history.size, :>=, 1, sku
         assert_equal BigDecimal(usdt), BigDecimal(history.first.fetch(:amount_usdt).to_s), sku
         assert_equal "core", history.first.fetch(:source), sku
         assert_equal BigDecimal(usdt), product.current_price_usdt, sku
       end
     end
+  end
+
+  def test_promotional_price_migration_keeps_existing_history_and_exclusive_usdt_only
+    usdt_rows = @database.connection[Sequel.qualify(:market, :product_prices)]
+    historical = usdt_rows.where(sku: "0x1_exclusive_6m").order(Sequel.desc(:id)).all
+    assert_equal [BigDecimal("19.49"), BigDecimal("24.49")],
+                 historical.first(2).map { |row| BigDecimal(row.fetch(:amount_usdt).to_s) }
+
+    seed_rows = @database.connection[Sequel.qualify(:market, :denomination_prices)]
+    seed_history = seed_rows.where(sku: "0x1_special_3m", denomination: "seeds")
+                            .order(Sequel.desc(:id)).all
+    assert_equal [1632, 1020], seed_history.first(2).map { |row| row.fetch(:amount_minor) }
+    assert_empty seed_rows.where(sku: "0x1_exclusive_1m", denomination: "seeds").all
+
+    assert_equal ["USDT"], @catalog.find_product("0x1_exclusive_1m").metadata.fetch("payment_modes")
   end
 
   def test_localizations_and_safe_unavailability
@@ -89,9 +104,12 @@ class Ox1SubscriptionCatalogTest < Minitest::Test
 
   def test_migration_is_replay_safe_and_preserves_prices
     prices = @database.connection[Sequel.qualify(:market, :product_prices)]
-    before = prices.where(sku: "0x1_special_1m").count
+    before = prices.where(sku: "0x1_exclusive_6m").count
+    seeds = @database.connection[Sequel.qualify(:market, :denomination_prices)]
+    seed_before = seeds.where(sku: "0x1_special_6m", denomination: "seeds").count
     migrate
-    assert_equal before, prices.where(sku: "0x1_special_1m").count
+    assert_equal before, prices.where(sku: "0x1_exclusive_6m").count
+    assert_equal seed_before, seeds.where(sku: "0x1_special_6m", denomination: "seeds").count
   end
 
   private

@@ -52,6 +52,40 @@ class CatalogTest < Minitest::Test
     assert_equal "sku is invalid", error.message
   end
 
+  def test_issuer_supplied_digital_product_is_not_a_human_broker
+    metadata = {
+      family: "digital_subscription",
+      purchase: { recipient: { provider: "issuer.example" } },
+      supplier: { kind: "system_broker", id: "issuer.example", issuer: "issuer.example" }
+    }
+    digital = ZeroXDA::Market::Catalog::Product.new(
+      sku: "digital_subscription", name: "Digital subscription",
+      button_label: "Subscribe", metadata: metadata, position: 5,
+      created_at: @time
+    )
+    assert digital.system_broker?
+    assert_equal "issuer.example", digital.supplier.fetch("id")
+    refute product("stars_500", position: 1).system_broker?
+
+    mismatched = metadata.merge(
+      supplier: { kind: "system_broker", id: "issuer.example", issuer: "another.issuer" }
+    )
+    assert_raises(ArgumentError) do
+      ZeroXDA::Market::Catalog::Product.new(
+        sku: "spoof", name: "Spoof", button_label: "Spoof",
+        metadata: mismatched, position: 6, created_at: @time
+      )
+    end
+    assert_raises(ArgumentError) do
+      ZeroXDA::Market::Catalog::Product.new(
+        sku: "spoof", name: "Spoof", button_label: "Spoof",
+        metadata: metadata.merge(supplier: { kind: "system_broker", id: "issuer.example",
+                                              issuer: "issuer.example", user_id: "alice" }),
+        position: 6, created_at: @time
+      )
+    end
+  end
+
   def test_limits_the_sku_to_telegram_callback_capacity
     error = assert_raises(ArgumentError) do
       product("a" * 61, position: 1)

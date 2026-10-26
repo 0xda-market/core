@@ -11,6 +11,7 @@ module ZeroXDA
         LOCALE_PATTERN = /\A[a-z]{2}_[A-Z]{2}\z/
         STATUSES = %w[active inactive].freeze
         CURRENCY_FAMILY = "currency"
+        SYSTEM_SUPPLIER_ID = /\A[a-z0-9][a-z0-9._-]{0,63}\z/
 
         attr_reader :sku,
                     :short_name,
@@ -56,6 +57,7 @@ module ZeroXDA
           raise ArgumentError, "product status is invalid" unless STATUSES.include?(status)
 
           @metadata = Core::RecordSupport.document(metadata, field: "metadata")
+          validate_supplier!
           @status = status.dup.freeze
           @position = Core::RecordSupport.non_negative_integer(position, field: "position")
           @marketable = marketable ? true : false
@@ -86,7 +88,32 @@ module ZeroXDA
           @metadata["code"]
         end
 
+        # An issuer-backed digital supplier is a system actor, not a human
+        # market.users broker or an infinite broker inventory listing.
+        def system_broker?
+          @metadata.dig("supplier", "kind") == "system_broker"
+        end
+
+        def supplier
+          @metadata["supplier"]
+        end
+
         private
+
+        def validate_supplier!
+          supplier = @metadata["supplier"]
+          return if supplier.nil?
+
+          unless supplier.is_a?(Hash) &&
+                 supplier.keys.sort == %w[id issuer kind] &&
+                 supplier["kind"] == "system_broker" &&
+                 supplier["id"].is_a?(String) &&
+                 SYSTEM_SUPPLIER_ID.match?(supplier["id"]) &&
+                 supplier["issuer"] == supplier["id"] &&
+                 @metadata.dig("purchase", "recipient", "provider") == supplier["issuer"]
+            raise ArgumentError, "system supplier must be a verified issuer identity"
+          end
+        end
 
         def optional_decimal(value)
           return nil if value.nil?

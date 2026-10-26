@@ -413,6 +413,13 @@ module ZeroXDA
 
         def marketable_product(sku)
           product = @catalog.find_product(sku.to_s)
+          if product.system_broker?
+            raise Core::Conflict.new(
+              "issuer-backed digital supply cannot be listed as human broker inventory",
+              code: "system_supplier_requires_issuer",
+              details: { sku: product.sku }
+            )
+          end
           return product if product.status == "active" && product.marketable?
 
           raise ArgumentError, "asset must be active and marketable"

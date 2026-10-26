@@ -79,6 +79,31 @@ class NilxBrowserAPITest < Minitest::Test
     assert_equal 401, @client.get("/session", "HTTP_COOKIE" => cookie).status
   end
 
+  def test_authenticated_identity_snapshot_is_display_only_not_checkout_authority
+    @context[:seeds] = "640"
+    @context[:seeds_authority] = "identity_snapshot"
+    code = JSON.parse(issue.body).fetch("code")
+    accepted = exchange(code)
+    assert_equal 303, accepted.status
+    cookie = accepted["set-cookie"].split(";").first
+    session = @client.get("/session", "HTTP_COOKIE" => cookie)
+    view = JSON.parse(session.body)
+    assert_equal "640", view["seeds"]
+    assert_equal "identity_snapshot", view["seeds_authority"]
+    refute view.key?("balance_debit_authorized")
+    refute view.key?("entitlement")
+  end
+
+  def test_invalid_authority_is_refused_and_legacy_remains_display_only
+    @context[:seeds_authority] = "customer_verified"
+    assert_equal 422, issue.status
+    @context.delete(:seeds_authority)
+    code = JSON.parse(issue.body).fetch("code")
+    accepted = exchange(code)
+    session = @client.get("/session", "HTTP_COOKIE" => accepted["set-cookie"].split(";").first)
+    assert_equal "client_display", JSON.parse(session.body)["seeds_authority"]
+  end
+
   def test_expired_codes_and_invalid_context_are_rejected
     code = JSON.parse(issue.body).fetch("code")
     @now += 60

@@ -10,6 +10,21 @@ customer's request with a snapshotted price and recipient, then follows the
 issuer's asynchronous decision. The two systems never call each other
 synchronously.
 
+## Seeds balance projection from 0x1
+
+The `/nilx-browser/handoffs` endpoint accepts a display-only `seeds`
+balance along with `seeds_authority`. A trusted 0x1 server can supply
+`seeds_authority: "identity_snapshot"`: the number was read from the
+issuer-owned Identity wallet, not asserted by a browser. Legacy handoffs
+without the field remain `client_display`. Only the authenticated server
+can post the handoff; arbitrary values are rejected.
+
+Both are **historical snapshots for presentation**, not spend permission or
+a payment proof. Before any purchase, the authenticated issuer order workflow
+must independently claim the order, atomically debit the authoritative
+Identity wallet and grant the entitlement. No balance copied into the Market
+session may become a writable Market ledger or an issuer confirmation.
+
 ## What this is not
 
 Issuer orders are a separate path from the marketplace purchase cycle:

@@ -77,6 +77,10 @@ module ZeroXDA
           subject = body.fetch("subject")
           point = body.fetch("point")
           seeds = body.fetch("seeds")
+          # Only a token-authenticated 0x1 server may attest to an issuer
+          # wallet snapshot. A missing field keeps legacy display-only context.
+          authority = body.fetch("seeds_authority", "client_display")
+          raise ArgumentError unless %w[client_display identity_snapshot].include?(authority)
           avaia = body.fetch("avaia")
           raise ArgumentError unless subject.is_a?(String) && subject.match?(/\A[a-f0-9]{64}\z/)
           raise ArgumentError unless point.is_a?(String) && point.match?(/\A[\p{L}\p{N}][\p{L}\p{N}_-]{0,63}\z/u)
@@ -87,7 +91,7 @@ module ZeroXDA
           raise ArgumentError unless (-180..180).cover?(lng) && (-90..90).cover?(lat)
 
           { "subject" => subject, "point" => point, "seeds" => seeds,
-            "seeds_authority" => "client_display", "avaia" => { "longitude" => lng, "latitude" => lat },
+            "seeds_authority" => authority, "avaia" => { "longitude" => lng, "latitude" => lat },
             "category" => "0x1" }
         end
 

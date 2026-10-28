@@ -30,14 +30,18 @@ module ZeroXDA
 
         # Returns [order, created]. Replaying the same idempotency key returns
         # the original order, even if the price or catalog changed since.
-        def create(customer_user_id:, sku:, denomination:, idempotency_key:)
+        def create(customer_user_id:, sku:, denomination:, idempotency_key:, verified_link: nil, expected_price: nil)
           customer = active_customer(customer_user_id)
           existing = @store.find_by_idempotency_key(customer_user_id: customer.id, idempotency_key: idempotency_key.to_s)
-          return [replayed(existing, sku, denomination), false] if existing
+          if existing
+            validate_replay_context!(existing, verified_link, expected_price)
+            return [replayed(existing, sku, denomination), false]
+          end
 
-          order = build_order(customer, sku.to_s, denomination.to_s, idempotency_key)
+          order = build_order(customer, sku.to_s, denomination.to_s, idempotency_key, verified_link, expected_price)
           event = event_for(order, from: nil, actor: "customer")
           persisted, created = @store.create(order, event: event)
+          validate_replay_context!(persisted, verified_link, expected_price) unless created
           [created ? persisted : replayed(persisted, sku, denomination), created]
         end
 
@@ -143,7 +147,16 @@ module ZeroXDA
 
         private
 
-        def build_order(customer, sku, code, idempotency_key)
+        def validate_replay_context!(order, link, price)
+          matching_price = !price || price == [order.price_id, order.amount_minor]
+          matching_link = !link || (link.provider == order.link_provider &&
+            link.provider_user_id == order.link_provider_user_id && link.pub_dress == order.recipient_subject)
+          return if matching_price && matching_link
+
+          raise Core::Conflict.new("idempotency key used for different purchase terms", code: "idempotency_conflict")
+        end
+
+        def build_order(customer, sku, code, idempotency_key, verified_link = nil, expected_price = nil)
           snapshot = @denominations.current_prices(denomination: code)
           denomination = snapshot.fetch(:denomination)
           entry = snapshot.fetch(:entries).find { |candidate| candidate.fetch(:product).sku == sku }
@@ -154,7 +167,10 @@ module ZeroXDA
 
           product = entry.fetch(:product)
           price = entry.fetch(:price)
-          link = recipient_link(customer, product, denomination)
+          if expected_price && expected_price != [price.id, price.amount_minor]
+            raise Core::Conflict.new("price changed; confirm the current offer", code: "price_changed")
+          end
+          link = recipient_link(customer, product, denomination, verified_link)
           Order.new(
             id: @id_generator.call, customer_user_id: customer.id, idempotency_key: idempotency_key,
             sku: product.sku, denomination: denomination.code, issuer: denomination.issuer,
@@ -166,12 +182,23 @@ module ZeroXDA
         # The recipient is always the customer's own issuer account. The issuer
         # says which one, by looking up the customer's channel accounts in its
         # directory. The product must name the issuer as its recipient.
-        def recipient_link(customer, product, denomination)
+        def recipient_link(customer, product, denomination, verified_link = nil)
           policy = product.metadata.dig("purchase", "recipient")
           unless policy.is_a?(Hash) && policy["provider"] == denomination.issuer &&
                  Array(policy.fetch("modes", ["self"])).include?("self")
             raise Core::Conflict.new("product is not delivered to the denomination issuer",
                                      code: "recipient_mode_unsupported", details: { sku: product.sku })
+          end
+
+          # Only a server-authenticated handoff adapter supplies this context.
+          # It is an immutable purchase authorization, not a copied binding map.
+          # The issuer must resolve the visit again and validate its active session.
+          if verified_link
+            unless verified_link.is_a?(Link) && verified_link.provider == "nilx_visit" &&
+                   denomination.issuer == "0x1" && product.system_broker?
+              raise ArgumentError, "invalid verified issuer visit"
+            end
+            return verified_link
           end
 
           links = customer_links(customer)

@@ -1,0 +1,47 @@
+# frozen_string_literal: true
+# © 2026 aiaiaiai · aiaiaiai.org
+# SPDX-License-Identifier: MIT
+
+# Release preflight by default. Activation is a separately authorized step,
+# after the issuer worker and browser checkout have been deployed and checked.
+require "bundler/setup"
+require "json"
+require_relative "../lib/zero_x_da/market/adapters/postgres_database"
+
+abort "usage: bundle exec ruby bin/activate_nilx_seeds_checkout [--activate]" unless ARGV.empty? || ARGV == ["--activate"]
+activate = ARGV == ["--activate"]
+database = ZeroXDA::Market::Adapters::PostgresDatabase.new(url: ENV.fetch("DATABASE_URL"), max_connections: 1)
+begin
+  db = database.connection
+  db.transaction do
+    skus = [1, 3, 6, 12].map { |months| "0x1_special_#{months}m" }
+    rows = db.fetch(<<~SQL, skus).all
+      SELECT p.sku, p.status, p.metadata, p.marketable,
+             (SELECT amount_minor FROM market.denomination_prices d
+              WHERE d.sku = p.sku AND d.denomination = 'seeds' ORDER BY id DESC LIMIT 1) AS seeds
+      FROM market.products p WHERE p.sku IN ? ORDER BY p.sku FOR UPDATE
+    SQL
+    abort "Special catalog incomplete" unless rows.length == 4
+    denomination = db[Sequel[:market][:denominations]].where(code: "seeds", issuer: "0x1", status: "active", scale: 0).first
+    abort "seeds denomination unavailable" unless denomination
+    rows.each do |row|
+      metadata = row[:metadata].is_a?(String) ? JSON.parse(row[:metadata]) : row[:metadata]
+      valid = %w[active inactive].include?(row[:status]) && row[:marketable] && row[:seeds].to_i.positive? &&
+        metadata["family"] == "0x1_subscription" && Array(metadata["payment_modes"]).include?("seeds") &&
+        metadata["supplier"] == { "kind" => "system_broker", "id" => "0x1", "issuer" => "0x1" } &&
+        metadata.dig("purchase", "recipient", "provider") == "0x1"
+      abort "Special catalog terms invalid" unless valid
+      puts "#{row[:sku]} #{row[:seeds]} seeds #{row[:status]}"
+    end
+    if activate
+      db[Sequel[:market][:products]].where(sku: skus, status: "inactive").update(
+        status: "active", version: Sequel[:version] + 1, updated_at: Time.now.utc
+      )
+      puts "Special seeds catalog activated; Exclusive unchanged"
+    else
+      puts "Preflight passed; no products activated"
+    end
+  end
+ensure
+  database.disconnect
+end

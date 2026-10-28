@@ -203,3 +203,29 @@ remove that refusal simply because the core's customer authorization tests pass.
 The issuer must implement its side of the contract: answer directory
 lookups for the market's token, run the claim → debit+grant →
 fulfil/reject loop, and rehearse the recovery procedure above.
+
+## Authenticated browser seeds checkout
+
+The `/nilx-browser` adapter accepts only a one-use, server-authenticated visit.
+It retains the recipient and opaque visit reference server-side. Customer JSON
+can select a Special SKU, current price ID/amount and idempotency key; it cannot
+select a wallet, recipient, issuer, session or grant duration. `/offers` includes
+only active Special products with a current seeds price and system supplier.
+Origin, JSON content type and `X-Market-Csrf: 1` protect mutations. Customers can
+read their own orders and cancel only while pending. Processing/fulfilment stay
+on the authenticated issuer API.
+
+`ENABLE_NILX_SEEDS_CHECKOUT=1` binds that API exclusively to `0x1`. Its credential
+is HMAC-SHA256 of `nilx-market-issuer-v1`, keyed by `NILX_BROWSER_HANDOFF_TOKEN`,
+encoded as lowercase hex. The browser never receives either secret. Existing
+explicit `ISSUER_API_*` settings must be removed before enabling this binding;
+ambiguous issuer configuration fails startup. Generic customer routes remain off.
+
+The release order is issuer worker, Market API, edge routing, browser clients,
+then `bundle exec ruby bin/activate_nilx_seeds_checkout` to inspect the catalog.
+Only after the deployment is authorized and verified, run the same command with
+`--activate`. It changes the four eligible Special records, preserves prices,
+and never activates Exclusive, credits wallets or changes subscriptions.
+The default preflight makes no persistent changes. Product activation and deploy
+are separate from merging this implementation. The issuer must use confirmed
+server funds; importing legacy client balances is outside this checkout.

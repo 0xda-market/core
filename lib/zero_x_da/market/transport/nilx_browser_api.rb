@@ -8,6 +8,7 @@ require "securerandom"
 require "rack"
 require_relative "bearer_auth"
 require_relative "issuer_order_presenter"
+require_relative "../issuer_orders/service"
 
 module ZeroXDA
   module Market
@@ -101,7 +102,9 @@ module ZeroXDA
               product, price = entry.values_at(:product, :price)
               next unless SPECIAL.include?(product.sku) && product.system_broker?
               { sku: product.sku, price_id: price.id, amount_minor: price.amount_minor,
-                denomination: "seeds", months: product.sku[/_(\d+)m\z/, 1].to_i }
+                denomination: "seeds", months: product.metadata["duration_months"],
+                term_policy: IssuerOrders::Order::TERM_POLICY,
+                authorization_ttl_seconds: IssuerOrders::Service::AUTHORIZATION_TTL }
             end
             return response(200, offers: offers)
           end

@@ -29,7 +29,8 @@ begin
       valid = %w[active inactive].include?(row[:status]) && row[:marketable] && row[:seeds].to_i.positive? &&
         metadata["family"] == "0x1_subscription" && Array(metadata["payment_modes"]).include?("seeds") &&
         metadata["supplier"] == { "kind" => "system_broker", "id" => "0x1", "issuer" => "0x1" } &&
-        metadata.dig("purchase", "recipient", "provider") == "0x1"
+        metadata.dig("purchase", "recipient", "provider") == "0x1" &&
+        metadata["duration_months"] == row[:sku][/_(\d+)m\z/, 1].to_i
       abort "Special catalog terms invalid" unless valid
       puts "#{row[:sku]} #{row[:seeds]} seeds #{row[:status]}"
     end

@@ -54,7 +54,8 @@ class PostgresIssuerOrdersTest < Minitest::Test
 
       @orders.claim(order.id, issuer: "0x1")
       fulfilled = @orders.fulfil(order.id, issuer: "0x1", reference: "debit-#{order.id}", amount_minor: 400,
-                                           denomination: "seeds", recipient_subject: order.recipient_subject)
+                                           denomination: "seeds", recipient_subject: order.recipient_subject,
+                                           term_months: 1)
       assert_equal fulfilled.to_h, @store.find(order.id).to_h
       assert_equal %w[pending processing fulfilled], @store.events(order.id).map(&:to_status)
       assert_equal({ "reference" => "debit-#{order.id}" }, @store.events(order.id).last.data)
@@ -105,7 +106,7 @@ class PostgresIssuerOrdersTest < Minitest::Test
       confirm = lambda do
         @orders.fulfil(
           order.id, issuer: "0x1", reference: reference, amount_minor: order.amount_minor,
-          denomination: "seeds", recipient_subject: order.recipient_subject
+          denomination: "seeds", recipient_subject: order.recipient_subject, term_months: 1
         )
       end
       fulfilled = confirm.call
@@ -116,7 +117,8 @@ class PostgresIssuerOrdersTest < Minitest::Test
                    assert_raises(Core::Conflict) {
                      @orders.fulfil(
                        order.id, issuer: "0x1", reference: "another-debit",
-                       amount_minor: 640, denomination: "seeds", recipient_subject: order.recipient_subject
+                       amount_minor: 640, denomination: "seeds", recipient_subject: order.recipient_subject,
+                       term_months: 1
                      )
                    }.code
 
@@ -127,6 +129,36 @@ class PostgresIssuerOrdersTest < Minitest::Test
                      @orders.create(customer_user_id: customer.id, sku: exclusive,
                                     denomination: "seeds", idempotency_key: "exclusive-seeds-check")
                    }.code
+    end
+  end
+
+  def test_term_and_authorization_deadline_persist_and_are_constrained
+    within_fixture do |customer|
+      order, = create_order(customer)
+      assert_equal [1, "calendar_months_utc", nil],
+                   [order.term_months, order.term_policy, order.authorization_expires_at]
+      assert_equal order.to_h, @store.find(order.id).to_h
+
+      link = ZeroXDA::Market::IssuerOrders::Service::Link.new(provider: "nilx_visit", provider_user_id: "v" * 43,
+                                                              pub_dress: "fixture-visit")
+      products = @connection[Sequel.qualify(:market, :products)]
+      products.where(sku: "issuer_order_fixture").update(
+        metadata: Sequel.pg_jsonb(products.where(sku: "issuer_order_fixture").get(:metadata).to_h
+          .merge("supplier" => { "kind" => "system_broker", "id" => "0x1", "issuer" => "0x1" }))
+      )
+      visit_order, = @orders.create(customer_user_id: customer.id, sku: "issuer_order_fixture",
+                                    denomination: "seeds", idempotency_key: "visit-order-1", verified_link: link)
+      stored = @store.find(visit_order.id)
+      assert_equal visit_order.to_h, stored.to_h
+      assert_in_delta 900, stored.authorization_expires_at - stored.created_at, 0.001
+
+      orders = @connection[Sequel.qualify(:market, :issuer_orders)].where(id: order.id)
+      [{ term_policy: nil }, { term_months: 0 }, { term_policy: "thirty_days" },
+       { authorization_expires_at: order.created_at }].each do |change|
+        assert_raises(Sequel::CheckConstraintViolation, change.inspect) do
+          @connection.transaction(savepoint: true) { orders.update(change) }
+        end
+      end
     end
   end
 
@@ -214,7 +246,7 @@ class PostgresIssuerOrdersTest < Minitest::Test
         sku: "issuer_order_fixture", short_name: "fixture", name: "fixture", button_label: "fixture",
         status: "active", position: products.max(:position).to_i + 1,
         metadata: Sequel.pg_jsonb(
-          "family" => "0x1_subscription", "payment_modes" => %w[USDT seeds],
+          "family" => "0x1_subscription", "duration_months" => 1, "payment_modes" => %w[USDT seeds],
           "purchase" => { "quantity_mode" => "single", "recipient" => { "provider" => "0x1", "modes" => ["self"] } }
         )
       )

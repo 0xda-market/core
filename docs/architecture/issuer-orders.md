@@ -108,6 +108,28 @@ Without them every lookup is `issuer_unavailable`.
 4. After signing in, the channel re-checks the status. Nothing is published to
    the market: the next lookup sees the new binding.
 
+## Term and authorization deadline
+
+A subscription order freezes what it buys when it is created, from the
+product's catalog `duration_months`: `term: { months, policy }`. The only
+policy is `calendar_months_utc`: a term of N months ends on the **same day of
+the month and the same time of day, in UTC, N calendar months later**. Bought
+on 29 October at 14:05 UTC, one month ends on 29 November at 14:05 UTC. A day
+the target month lacks becomes that month's last day at the same time
+(31 January + 1 month = 28 or 29 February). It is never a fixed 30 days. The
+issuer applies the term to the Bond's subscription clock, which decides where
+the term starts when time remains (the issuer's priority rule); the market
+only fixes how long it is. The fulfil confirmation must name the same
+`term_months`, or it fails closed like any other mismatch.
+
+An order the customer confirmed in a browser visit carries
+`authorization_expires_at`, 15 minutes after creation. Until then the issuer
+may claim it. A claim at or after the deadline rejects the order with
+`authorization_expired` instead, and repeating that claim returns the same
+rejection: an unclaimed order was never debited, so it can safely end. A claimed
+order never expires; recovery below still applies to it. A customer whose order
+expired confirms the current offer again under a new idempotency key.
+
 ## Ordering rules
 
 A customer can order only goods that `GET /v1/denominations/:code/prices`
@@ -144,7 +166,7 @@ Issuer routes are mounted at `/issuer` only when `ISSUER_API_TOKEN` and
 | `GET /issuer/v1/orders?status=pending&limit=&cursor=` | oldest-first queue; `meta.next_cursor` fetches the next page |
 | `GET /issuer/v1/orders/:id` | read one order |
 | `POST /issuer/v1/orders/:id/claim` | take an order before debiting |
-| `POST /issuer/v1/orders/:id/fulfil` | `issuer_reference`, `amount_minor`, `denomination`, `recipient_subject` |
+| `POST /issuer/v1/orders/:id/fulfil` | `issuer_reference`, `amount_minor`, `denomination`, `recipient_subject`, and `term_months` when the order has a term |
 | `POST /issuer/v1/orders/:id/reject` | `code` (`^[a-z][a-z0-9_]{1,63}$`) |
 
 The expected issuer loop is: poll the queue, claim, perform the atomic debit

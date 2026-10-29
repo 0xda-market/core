@@ -46,7 +46,8 @@ class NilxSeedsCheckoutTest < Minitest::Test
       "supplier" => { "kind" => "system_broker", "id" => "0x1", "issuer" => "0x1" } }
     products = ["0x1_special_1m", "0x1_special_3m", "0x1_exclusive_1m"].map.with_index do |sku, index|
       M::Catalog::Product.new(sku: sku, name: sku, button_label: sku, locale: "en_US", position: index,
-        status: index == 1 ? "inactive" : "active", metadata: metadata, created_at: @now)
+        status: index == 1 ? "inactive" : "active",
+        metadata: metadata.merge("duration_months" => sku[/_(\d+)m\z/, 1].to_i), created_at: @now)
     end
     catalog = M::Catalog::Service.new(store: M::Catalog::MemoryStore.new(products: products))
     denominations = M::Denominations::MemoryStore.new(denominations: [
@@ -125,7 +126,7 @@ class NilxSeedsCheckoutTest < Minitest::Test
     assert_equal 409, post("/orders/#{id}/cancel", {}).status
     assert_equal 404, post("/orders/#{id}/fulfil", {}).status
     @orders.fulfil(id, issuer: "0x1", reference: "identity:#{id}", amount_minor: 640,
-      denomination: "seeds", recipient_subject: "0x0sky")
+      denomination: "seeds", recipient_subject: "0x0sky", term_months: 1)
     view = JSON.parse(@client.get("/orders/#{id}", "HTTP_COOKIE" => @cookie).body)
     assert_equal "fulfilled", view.dig("order", "attributes", "status")
     assert_equal "v" * 43, view.fetch("visit_id")
@@ -138,6 +139,55 @@ class NilxSeedsCheckoutTest < Minitest::Test
     @now += 1800
     assert_equal 401, post.status
   end
+  def test_order_freezes_the_calendar_term_and_its_authorization_deadline
+    offer = JSON.parse(@client.get("/offers", "HTTP_COOKIE" => @cookie).body).fetch("offers").first
+    assert_equal [1, "calendar_months_utc", 900],
+                 offer.values_at("months", "term_policy", "authorization_ttl_seconds")
+    attributes = JSON.parse(post.body).dig("order", "attributes")
+    assert_equal({ "months" => 1, "policy" => "calendar_months_utc" }, attributes.fetch("term"))
+    assert_equal (@now + 900).iso8601(6), attributes.fetch("authorization_expires_at")
+  end
+
+  def test_issuer_confirmation_must_name_the_frozen_term
+    id = JSON.parse(post.body).dig("order", "id")
+    @orders.claim(id, issuer: "0x1")
+    [nil, 3].each do |months|
+      error = assert_raises(M::Core::Conflict) do
+        @orders.fulfil(id, issuer: "0x1", reference: "identity:#{id}", amount_minor: 640,
+          denomination: "seeds", recipient_subject: "0x0sky", term_months: months)
+      end
+      assert_equal "issuer_confirmation_mismatch", error.code
+    end
+    assert_equal "processing", @orders.find_for_issuer(id, issuer: "0x1").status
+  end
+
+  def test_unclaimed_order_expires_into_a_rejection_never_a_debit
+    id = JSON.parse(post.body).dig("order", "id")
+    @now += 899
+    assert_equal "pending", JSON.parse(@client.get("/orders/#{id}", "HTTP_COOKIE" => @cookie).body)
+      .dig("order", "attributes", "status")
+    @now += 1
+    expired = @orders.claim(id, issuer: "0x1")
+    assert_equal %w[rejected authorization_expired], [expired.status, expired.rejection_code]
+    assert_nil expired.claimed_at
+    assert_equal expired, @orders.claim(id, issuer: "0x1")
+    assert_raises(M::Core::InvalidTransition) do
+      @orders.fulfil(id, issuer: "0x1", reference: "identity:#{id}", amount_minor: 640,
+        denomination: "seeds", recipient_subject: "0x0sky", term_months: 1)
+    end
+  end
+
+  def test_claim_in_time_keeps_processing_after_the_deadline
+    id = JSON.parse(post.body).dig("order", "id")
+    @now += 899
+    @orders.claim(id, issuer: "0x1")
+    @now += 3600
+    assert_equal "processing", @orders.claim(id, issuer: "0x1").status
+    fulfilled = @orders.fulfil(id, issuer: "0x1", reference: "identity:#{id}", amount_minor: 640,
+      denomination: "seeds", recipient_subject: "0x0sky", term_months: 1)
+    assert_equal "fulfilled", fulfilled.status
+  end
+
   def test_replay_cannot_change_quote_or_visit
     first = post
     assert_equal 201, first.status

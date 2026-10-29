@@ -16,15 +16,23 @@ module ZeroXDA
         TERMINAL_STATUSES = %w[fulfilled rejected cancelled].freeze
         IDEMPOTENCY_KEY_PATTERN = /\A[A-Za-z0-9._:-]{8,128}\z/
         REJECTION_CODE_PATTERN = /\A[a-z][a-z0-9_]{1,63}\z/
+        # A subscription term of N months ends on the same day of the month and
+        # the same time of day, in UTC, N calendar months after it starts. A day
+        # the target month lacks becomes that month's last day at the same time.
+        TERM_POLICY = "calendar_months_utc"
+        # Issuer rejection code for a pending order nobody claimed in time.
+        AUTHORIZATION_EXPIRED = "authorization_expired"
 
         attr_reader :id, :customer_user_id, :idempotency_key, :sku, :denomination, :issuer,
                     :amount_minor, :price_id, :recipient_subject, :link_provider, :link_provider_user_id, :status, :issuer_reference,
-                    :rejection_code, :created_at, :updated_at, :claimed_at, :completed_at, :version
+                    :rejection_code, :created_at, :updated_at, :claimed_at, :completed_at, :version,
+                    :term_months, :term_policy, :authorization_expires_at
 
         def initialize(
           id:, customer_user_id:, idempotency_key:, sku:, denomination:, issuer:, amount_minor:,
           price_id:, recipient_subject:, link_provider:, link_provider_user_id:, created_at:, status: "pending", issuer_reference: nil,
-          rejection_code: nil, updated_at: created_at, claimed_at: nil, completed_at: nil, version: 0
+          rejection_code: nil, updated_at: created_at, claimed_at: nil, completed_at: nil, version: 0,
+          term_months: nil, term_policy: nil, authorization_expires_at: nil
         )
           @id = Core::RecordSupport.identifier(id, field: "issuer order id")
           @customer_user_id = Core::RecordSupport.identifier(customer_user_id, field: "customer user id")
@@ -47,12 +55,29 @@ module ZeroXDA
           @claimed_at = claimed_at && Core::RecordSupport.time(claimed_at, field: "claimed_at")
           @completed_at = completed_at && Core::RecordSupport.time(completed_at, field: "completed_at")
           @version = Core::RecordSupport.non_negative_integer(version, field: "version")
+          @term_months = term_months && positive_integer(term_months, field: "term_months")
+          raise ArgumentError, "term_months must be at most 120" if @term_months && @term_months > 120
+          raise ArgumentError, "term policy is invalid" unless term_policy.nil? || term_policy == TERM_POLICY
+          raise ArgumentError, "term needs both months and policy" unless @term_months.nil? == term_policy.nil?
+
+          @term_policy = term_policy&.dup&.freeze
+          @authorization_expires_at = authorization_expires_at &&
+                                      Core::RecordSupport.time(authorization_expires_at, field: "authorization_expires_at")
+          if @authorization_expires_at && @authorization_expires_at <= @created_at
+            raise ArgumentError, "authorization must expire after the order is created"
+          end
           validate_outcome!
           freeze
         end
 
         def terminal?
           TERMINAL_STATUSES.include?(@status)
+        end
+
+        # The customer's confirmation authorizes a debit only until this time.
+        # A claim starts the debit, so only an unclaimed order can expire.
+        def authorization_expired?(at)
+          !@authorization_expires_at.nil? && at >= @authorization_expires_at
         end
 
         def claim(at:)
@@ -82,7 +107,8 @@ module ZeroXDA
             recipient_subject: @recipient_subject, link_provider: @link_provider,
             link_provider_user_id: @link_provider_user_id, status: @status, issuer_reference: @issuer_reference,
             rejection_code: @rejection_code, created_at: @created_at, updated_at: @updated_at,
-            claimed_at: @claimed_at, completed_at: @completed_at, version: @version
+            claimed_at: @claimed_at, completed_at: @completed_at, version: @version,
+            term_months: @term_months, term_policy: @term_policy, authorization_expires_at: @authorization_expires_at
           }
         end
 

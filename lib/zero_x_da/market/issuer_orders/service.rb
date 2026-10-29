@@ -13,6 +13,9 @@ module ZeroXDA
       # holds, debits or values the denomination itself.
       class Service
         MAX_PAGE = 100
+        # How long a customer's confirmed offer authorizes the issuer to start
+        # the debit. Later, a claim rejects the order instead of debiting.
+        AUTHORIZATION_TTL = 15 * 60
 
         # One of the customer's channel accounts and the issuer account the
         # issuer's directory says it belongs to.
@@ -30,14 +33,18 @@ module ZeroXDA
 
         # Returns [order, created]. Replaying the same idempotency key returns
         # the original order, even if the price or catalog changed since.
-        def create(customer_user_id:, sku:, denomination:, idempotency_key:)
+        def create(customer_user_id:, sku:, denomination:, idempotency_key:, verified_link: nil, expected_price: nil)
           customer = active_customer(customer_user_id)
           existing = @store.find_by_idempotency_key(customer_user_id: customer.id, idempotency_key: idempotency_key.to_s)
-          return [replayed(existing, sku, denomination), false] if existing
+          if existing
+            validate_replay_context!(existing, verified_link, expected_price)
+            return [replayed(existing, sku, denomination), false]
+          end
 
-          order = build_order(customer, sku.to_s, denomination.to_s, idempotency_key)
+          order = build_order(customer, sku.to_s, denomination.to_s, idempotency_key, verified_link, expected_price)
           event = event_for(order, from: nil, actor: "customer")
           persisted, created = @store.create(order, event: event)
+          validate_replay_context!(persisted, verified_link, expected_price) unless created
           [created ? persisted : replayed(persisted, sku, denomination), created]
         end
 
@@ -76,24 +83,33 @@ module ZeroXDA
           order
         end
 
+        # An expired pending order was never debited, so the claim rejects it
+        # and returns it; the issuer sees the rejection and moves on.
         def claim(id, issuer:)
           order = find_for_issuer(id, issuer: issuer)
           return order if order.status == "processing"
+          return order if order.status == "rejected" && order.rejection_code == Order::AUTHORIZATION_EXPIRED
 
-          apply(order, order.claim(at: now), actor: "issuer")
+          at = now
+          if order.status == "pending" && order.authorization_expired?(at)
+            code = Order::AUTHORIZATION_EXPIRED
+            return apply(order, order.reject(code: code, at: at), actor: "issuer", data: { "code" => code })
+          end
+
+          apply(order, order.claim(at: at), actor: "issuer")
         end
 
         # The issuer confirms that it debited and granted exactly what was
         # ordered. Any difference fails closed and leaves the order unchanged.
-        def fulfil(id, issuer:, reference:, amount_minor:, denomination:, recipient_subject:)
+        def fulfil(id, issuer:, reference:, amount_minor:, denomination:, recipient_subject:, term_months: nil)
           order = find_for_issuer(id, issuer: issuer)
           reference = reference.to_s
           # Checked before the replay shortcut: a replay succeeds only for the
           # same complete confirmation, never for a conflicting one.
           expected = { "amount_minor" => order.amount_minor, "denomination" => order.denomination,
-                       "recipient_subject" => order.recipient_subject }
+                       "recipient_subject" => order.recipient_subject, "term_months" => order.term_months }
           actual = { "amount_minor" => amount_minor, "denomination" => denomination,
-                     "recipient_subject" => recipient_subject }
+                     "recipient_subject" => recipient_subject, "term_months" => term_months }
           mismatched = expected.keys.reject { |key| expected[key] == actual[key] }
           unless mismatched.empty?
             raise Core::Conflict.new("issuer confirmation does not match the order",
@@ -143,7 +159,16 @@ module ZeroXDA
 
         private
 
-        def build_order(customer, sku, code, idempotency_key)
+        def validate_replay_context!(order, link, price)
+          matching_price = !price || price == [order.price_id, order.amount_minor]
+          matching_link = !link || (link.provider == order.link_provider &&
+            link.provider_user_id == order.link_provider_user_id && link.pub_dress == order.recipient_subject)
+          return if matching_price && matching_link
+
+          raise Core::Conflict.new("idempotency key used for different purchase terms", code: "idempotency_conflict")
+        end
+
+        def build_order(customer, sku, code, idempotency_key, verified_link = nil, expected_price = nil)
           snapshot = @denominations.current_prices(denomination: code)
           denomination = snapshot.fetch(:denomination)
           entry = snapshot.fetch(:entries).find { |candidate| candidate.fetch(:product).sku == sku }
@@ -154,24 +179,54 @@ module ZeroXDA
 
           product = entry.fetch(:product)
           price = entry.fetch(:price)
-          link = recipient_link(customer, product, denomination)
+          if expected_price && expected_price != [price.id, price.amount_minor]
+            raise Core::Conflict.new("price changed; confirm the current offer", code: "price_changed")
+          end
+          link = recipient_link(customer, product, denomination, verified_link)
+          created_at = now
+          months = term_months(product)
           Order.new(
             id: @id_generator.call, customer_user_id: customer.id, idempotency_key: idempotency_key,
             sku: product.sku, denomination: denomination.code, issuer: denomination.issuer,
             amount_minor: price.amount_minor, price_id: price.id, recipient_subject: link.pub_dress,
-            link_provider: link.provider, link_provider_user_id: link.provider_user_id, created_at: now
+            link_provider: link.provider, link_provider_user_id: link.provider_user_id, created_at: created_at,
+            term_months: months, term_policy: months && Order::TERM_POLICY,
+            authorization_expires_at: verified_link && (created_at + AUTHORIZATION_TTL)
           )
+        end
+
+        # A subscription's term is frozen into the order from the catalog, so a
+        # later catalog edit or an issuer default can never change what was bought.
+        def term_months(product)
+          return nil unless product.metadata["family"] == "0x1_subscription"
+
+          months = product.metadata["duration_months"]
+          return months if months.is_a?(Integer) && months.between?(1, 120)
+
+          raise Core::Conflict.new("subscription term is not configured", code: "subscription_term_unavailable",
+                                                                          details: { sku: product.sku })
         end
 
         # The recipient is always the customer's own issuer account. The issuer
         # says which one, by looking up the customer's channel accounts in its
         # directory. The product must name the issuer as its recipient.
-        def recipient_link(customer, product, denomination)
+        def recipient_link(customer, product, denomination, verified_link = nil)
           policy = product.metadata.dig("purchase", "recipient")
           unless policy.is_a?(Hash) && policy["provider"] == denomination.issuer &&
                  Array(policy.fetch("modes", ["self"])).include?("self")
             raise Core::Conflict.new("product is not delivered to the denomination issuer",
                                      code: "recipient_mode_unsupported", details: { sku: product.sku })
+          end
+
+          # Only a server-authenticated handoff adapter supplies this context.
+          # It is an immutable purchase authorization, not a copied binding map.
+          # The issuer must resolve the visit again and validate its active session.
+          if verified_link
+            unless verified_link.is_a?(Link) && verified_link.provider == "nilx_visit" &&
+                   denomination.issuer == "0x1" && product.system_broker?
+              raise ArgumentError, "invalid verified issuer visit"
+            end
+            return verified_link
           end
 
           links = customer_links(customer)

@@ -28,7 +28,9 @@ module ZeroXDA
               "created_at" => order.created_at.iso8601(6),
               "updated_at" => order.updated_at.iso8601(6),
               "claimed_at" => order.claimed_at&.iso8601(6),
-              "completed_at" => order.completed_at&.iso8601(6)
+              "completed_at" => order.completed_at&.iso8601(6),
+              "term" => order.term_months && { "months" => order.term_months, "policy" => order.term_policy },
+              "authorization_expires_at" => order.authorization_expires_at&.iso8601(6)
             }
           }
           return resource if audience == :issuer

@@ -60,8 +60,19 @@ operator_token = ENV["MANUAL_PROVIDER_TOKEN"]
 database_url = ENV["DATABASE_URL"]
 mock_payment_enabled = ENV.fetch("ENABLE_MOCK_PAYMENT_PROVIDER", "0") == "1"
 mock_payment_token = ENV["MOCK_PAYMENT_PROVIDER_TOKEN"]
+# Domain-separated issuer credentials reuse the deployed server-only secret
+# envelope without exposing browser handoff authority on the issuer endpoint.
+nilx_checkout = ENV.fetch("ENABLE_NILX_SEEDS_CHECKOUT", "0") == "1"
 issuer_api_token = ENV["ISSUER_API_TOKEN"].to_s
 issuer_api_issuer = ENV["ISSUER_API_ISSUER"].to_s
+if nilx_checkout
+  require "openssl"
+  handoff_secret = ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN", "")
+  raise "nilx checkout requires a strong handoff secret" if handoff_secret.bytesize < 32
+  raise "nilx checkout owns the issuer API binding" unless issuer_api_token.empty? && issuer_api_issuer.empty?
+  issuer_api_token = OpenSSL::HMAC.hexdigest("SHA256", handoff_secret, "nilx-market-issuer-v1")
+  issuer_api_issuer = "0x1"
+end
 if issuer_api_token.empty? != issuer_api_issuer.empty?
   raise "ISSUER_API_TOKEN and ISSUER_API_ISSUER must be configured together"
 end
@@ -176,7 +187,9 @@ unless ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN", "").empty?
   require_relative "lib/zero_x_da/market/transport/nilx_browser_api"
   applications["/nilx-browser"] = ZeroXDA::Market::Transport::NilxBrowserAPI.new(
     store: ZeroXDA::Market::Identity::BrowserSessionStore.new(database: database),
-    identity_service: identity_service, token: ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN")
+    identity_service: identity_service, token: ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN"),
+    issuer_orders: nilx_checkout ? issuer_orders : nil,
+    denominations: denominations
   )
 end
 operator_api = nil

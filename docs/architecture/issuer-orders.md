@@ -108,6 +108,28 @@ Without them every lookup is `issuer_unavailable`.
 4. After signing in, the channel re-checks the status. Nothing is published to
    the market: the next lookup sees the new binding.
 
+## Term and authorization deadline
+
+A subscription order freezes what it buys when it is created, from the
+product's catalog `duration_months`: `term: { months, policy }`. The only
+policy is `calendar_months_utc`: a term of N months ends on the **same day of
+the month and the same time of day, in UTC, N calendar months later**. Bought
+on 29 October at 14:05 UTC, one month ends on 29 November at 14:05 UTC. A day
+the target month lacks becomes that month's last day at the same time
+(31 January + 1 month = 28 or 29 February). It is never a fixed 30 days. The
+issuer applies the term to the Bond's subscription clock, which decides where
+the term starts when time remains (the issuer's priority rule); the market
+only fixes how long it is. The fulfil confirmation must name the same
+`term_months`, or it fails closed like any other mismatch.
+
+An order the customer confirmed in a browser visit carries
+`authorization_expires_at`, 15 minutes after creation. Until then the issuer
+may claim it. A claim at or after the deadline rejects the order with
+`authorization_expired` instead, and repeating that claim returns the same
+rejection: an unclaimed order was never debited, so it can safely end. A claimed
+order never expires; recovery below still applies to it. A customer whose order
+expired confirms the current offer again under a new idempotency key.
+
 ## Ordering rules
 
 A customer can order only goods that `GET /v1/denominations/:code/prices`
@@ -144,7 +166,7 @@ Issuer routes are mounted at `/issuer` only when `ISSUER_API_TOKEN` and
 | `GET /issuer/v1/orders?status=pending&limit=&cursor=` | oldest-first queue; `meta.next_cursor` fetches the next page |
 | `GET /issuer/v1/orders/:id` | read one order |
 | `POST /issuer/v1/orders/:id/claim` | take an order before debiting |
-| `POST /issuer/v1/orders/:id/fulfil` | `issuer_reference`, `amount_minor`, `denomination`, `recipient_subject` |
+| `POST /issuer/v1/orders/:id/fulfil` | `issuer_reference`, `amount_minor`, `denomination`, `recipient_subject`, and `term_months` when the order has a term |
 | `POST /issuer/v1/orders/:id/reject` | `code` (`^[a-z][a-z0-9_]{1,63}$`) |
 
 The expected issuer loop is: poll the queue, claim, perform the atomic debit
@@ -203,3 +225,29 @@ remove that refusal simply because the core's customer authorization tests pass.
 The issuer must implement its side of the contract: answer directory
 lookups for the market's token, run the claim → debit+grant →
 fulfil/reject loop, and rehearse the recovery procedure above.
+
+## Authenticated browser seeds checkout
+
+The `/nilx-browser` adapter accepts only a one-use, server-authenticated visit.
+It retains the recipient and opaque visit reference server-side. Customer JSON
+can select a Special SKU, current price ID/amount and idempotency key; it cannot
+select a wallet, recipient, issuer, session or grant duration. `/offers` includes
+only active Special products with a current seeds price and system supplier.
+Origin, JSON content type and `X-Market-Csrf: 1` protect mutations. Customers can
+read their own orders and cancel only while pending. Processing/fulfilment stay
+on the authenticated issuer API.
+
+`ENABLE_NILX_SEEDS_CHECKOUT=1` binds that API exclusively to `0x1`. Its credential
+is HMAC-SHA256 of `nilx-market-issuer-v1`, keyed by `NILX_BROWSER_HANDOFF_TOKEN`,
+encoded as lowercase hex. The browser never receives either secret. Existing
+explicit `ISSUER_API_*` settings must be removed before enabling this binding;
+ambiguous issuer configuration fails startup. Generic customer routes remain off.
+
+The release order is issuer worker, Market API, edge routing, browser clients,
+then `bundle exec ruby bin/activate_nilx_seeds_checkout` to inspect the catalog.
+Only after the deployment is authorized and verified, run the same command with
+`--activate`. It changes the four eligible Special records, preserves prices,
+and never activates Exclusive, credits wallets or changes subscriptions.
+The default preflight makes no persistent changes. Product activation and deploy
+are separate from merging this implementation. The issuer must use confirmed
+server funds; importing legacy client balances is outside this checkout.

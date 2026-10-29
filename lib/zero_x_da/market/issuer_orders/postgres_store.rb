@@ -12,7 +12,7 @@ module ZeroXDA
         COLUMNS = %i[
           id customer_user_id idempotency_key sku denomination issuer amount_minor price_id
           recipient_subject link_provider link_provider_user_id status issuer_reference rejection_code created_at updated_at
-          claimed_at completed_at version
+          claimed_at completed_at version term_months term_policy authorization_expires_at
         ].freeze
 
         def initialize(database:)

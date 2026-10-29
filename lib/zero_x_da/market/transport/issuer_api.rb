@@ -68,7 +68,8 @@ module ZeroXDA
             body = @request_parser.request_document(request)
             @issuer_orders.fulfil(
               id, issuer: @issuer, reference: body.fetch("issuer_reference"), amount_minor: body.fetch("amount_minor"),
-                  denomination: body.fetch("denomination"), recipient_subject: body.fetch("recipient_subject")
+                  denomination: body.fetch("denomination"), recipient_subject: body.fetch("recipient_subject"),
+                  term_months: body["term_months"]
             )
           when "reject"
             body = @request_parser.request_document(request)

@@ -21,13 +21,17 @@ module ZeroXDA
         COOKIE = "__Host-market_nilx"
         SOURCE = "https://nilx.one"
         TARGET = "https://0xda-market.nilx.one"
+        # The BBond whose stations this Market host serves.
+        MARKET_OWNER = "0xda-market"
 
-        def initialize(store:, identity_service:, token:, clock: -> { Time.now.to_i }, issuer_orders: nil, denominations: nil)
+        def initialize(store:, identity_service:, token:, clock: -> { Time.now.to_i }, issuer_orders: nil, denominations: nil,
+                       points: nil)
           raise ArgumentError, "handoff token must have at least 32 bytes" if token.to_s.bytesize < 32
 
           @store, @identity, @clock = store, identity_service, clock
           @auth = BearerAuth.new(token: token)
           @orders, @denominations = issuer_orders, denominations
+          @points = points
         end
 
         def call(env)
@@ -35,12 +39,15 @@ module ZeroXDA
           if request.path_info == "/offers" || request.path_info.start_with?("/orders")
             return checkout(request)
           end
+          return points(request) if request.path_info == "/points" || request.path_info.start_with?("/points/")
           case [request.request_method, request.path_info]
           when ["POST", "/handoffs"]
             return response(401, error: "unauthorized") unless @auth.authorized?(request)
 
             body = JSON.parse(request.body.read(8193))
             context = validate(body)
+            address = @points&.address_for(owner_pub_dress: MARKET_OWNER, point: context.fetch("point"))
+            context = context.merge("address" => address) if address
             code = SecureRandom.urlsafe_base64(32)
             @store.put(digest(code), "handoff", context, @clock.call + 60)
             response(201, code: code, action: "#{TARGET}/nilx-browser/exchange", expires_in: 60)
@@ -59,7 +66,7 @@ module ZeroXDA
             session = SecureRandom.urlsafe_base64(32)
             @store.put(digest(session), "session", context.merge("market_user_id" => auth.user.id), @clock.call + 1800)
             headers = {
-              "location" => "#{TARGET}/#{Rack::Utils.escape_path(context.fetch('point'))}",
+              "location" => "#{TARGET}/#{Rack::Utils.escape_path(context.fetch('address', context.fetch('point')))}",
               "set-cookie" => "#{COOKIE}=#{session}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=1800"
             }
             response(303, {}, headers)
@@ -86,6 +93,24 @@ module ZeroXDA
         private
 
         SPECIAL = %w[0x1_special_1m 0x1_special_3m 0x1_special_6m 0x1_special_12m].freeze
+
+        # Public: which point a Market path names and its canonical address.
+        def points(request)
+          return response(404, error: "not_found") unless @points && request.get?
+          if request.path_info == "/points"
+            return response(200, points: @points.all.map { |point| present_point(point) })
+          end
+
+          segment = Rack::Utils.unescape_path(request.path_info.delete_prefix("/points/")).force_encoding(Encoding::UTF_8)
+          resolution = segment.include?("/") ? nil : @points.resolve(segment)
+          return response(404, error: "point_not_found") unless resolution
+
+          response(200, point: present_point(resolution.point).merge(canonical: resolution.canonical))
+        end
+
+        def present_point(point)
+          { address: point.address, station_pub_dress: point.station_pub_dress, path: "/#{point.address}" }
+        end
 
         def checkout(request)
           return response(503, error: "checkout_unavailable") unless @orders && @denominations

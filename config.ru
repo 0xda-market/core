@@ -185,11 +185,14 @@ unless ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN", "").empty?
   raise "nilx browser handoff requires PostgreSQL" unless database
   require_relative "lib/zero_x_da/market/identity/browser_session_store"
   require_relative "lib/zero_x_da/market/transport/nilx_browser_api"
+  require_relative "lib/zero_x_da/market/points/postgres_store"
+  require_relative "lib/zero_x_da/market/points/service"
   applications["/nilx-browser"] = ZeroXDA::Market::Transport::NilxBrowserAPI.new(
     store: ZeroXDA::Market::Identity::BrowserSessionStore.new(database: database),
     identity_service: identity_service, token: ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN"),
     issuer_orders: nilx_checkout ? issuer_orders : nil,
-    denominations: denominations
+    denominations: denominations,
+    points: ZeroXDA::Market::Points::Service.new(store: ZeroXDA::Market::Points::PostgresStore.new(database: database))
   )
 end
 operator_api = nil

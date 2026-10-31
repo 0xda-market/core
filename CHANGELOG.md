@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Signed channel assertions: a channel adapter in its own process proves the
+  verified customer to the issuer-order routes with a short-lived
+  `X-Market-Customer-Assertion`, checked against the market's own identity
+  store. `ENABLE_ISSUER_ORDER_ROUTES=1` now requires `CHANNEL_ASSERTION_SECRET`
+  and `CHANNEL_ASSERTION_PROVIDERS`; production still refuses the flag. Every
+  issuer order now carries the 15-minute authorization deadline.
 - Execution-aware client pricing and a locked pre-order profitability gate that
   prevents marketplace reservations below the configured net margin.
 - Issuer denominations: a non-fiat registry with `seeds` (₴€£) as the first

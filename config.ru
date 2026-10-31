@@ -34,6 +34,7 @@ require_relative "lib/zero_x_da/market/issuer_orders/memory_store"
 require_relative "lib/zero_x_da/market/issuer_orders/postgres_store"
 require_relative "lib/zero_x_da/market/issuer_orders/service"
 require_relative "lib/zero_x_da/market/transport/issuer_api"
+require_relative "lib/zero_x_da/market/transport/channel_customer_assertion"
 require_relative "lib/zero_x_da/market/localization/service"
 require_relative "lib/zero_x_da/market/listings/memory_store"
 require_relative "lib/zero_x_da/market/listings/postgres_store"
@@ -82,10 +83,16 @@ issuer_directory_providers = ENV["ISSUER_DIRECTORY_PROVIDERS"].to_s.split(",").m
 if issuer_directory_url.empty? != issuer_directory_token.empty?
   raise "ISSUER_DIRECTORY_URL and ISSUER_DIRECTORY_TOKEN must be configured together"
 end
-# A server-injected, verified customer Rack context is required by the router,
-# but production has no channel-proof authenticator supplying that context yet.
-# Customer routes stay off until the verified ingress and its tests ship.
+# A server-injected, verified customer Rack context is required by the router.
+# A channel adapter in its own process (a messenger bot) supplies it with a
+# signed customer assertion (CHANNEL_ASSERTION_SECRET). Production stays off
+# until the channel flow has been proven end to end in development.
 issuer_order_routes = ENV.fetch("ENABLE_ISSUER_ORDER_ROUTES", "0") == "1"
+channel_assertion_secret = ENV["CHANNEL_ASSERTION_SECRET"].to_s
+channel_assertion_providers = ENV["CHANNEL_ASSERTION_PROVIDERS"].to_s.split(",").map(&:strip).reject(&:empty?)
+if issuer_order_routes && (channel_assertion_secret.empty? || channel_assertion_providers.empty?)
+  raise "issuer order routes require CHANNEL_ASSERTION_SECRET and CHANNEL_ASSERTION_PROVIDERS"
+end
 market_payment_provider = ENV["MARKET_PAYMENT_PROVIDER"].to_s.strip
 manual_quote_ttl = Integer(ENV.fetch("MANUAL_QUOTE_TTL_SECONDS", "900"))
 raise "MANUAL_QUOTE_TTL_SECONDS must be positive" unless manual_quote_ttl.positive?
@@ -180,6 +187,12 @@ public_api = ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, token: publ
                                                      listings: listings, marketplace: marketplace, broker_orders: broker_orders,
                                                      broker_earnings: broker_earnings, denominations: denominations,
                                                      issuer_orders: issuer_order_routes ? issuer_orders : nil)
+if issuer_order_routes
+  public_api = ZeroXDA::Market::Transport::ChannelCustomerAssertion.new(public_api, secret: channel_assertion_secret,
+                                                                                   users: identity_store,
+                                                                                   providers: channel_assertion_providers,
+                                                                                   clock: clock)
+end
 applications = { "/" => public_api }
 unless ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN", "").empty?
   raise "nilx browser handoff requires PostgreSQL" unless database

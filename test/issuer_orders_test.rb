@@ -14,6 +14,7 @@ require "zero_x_da/market/issuer_orders/memory_directory"
 require "zero_x_da/market/issuer_orders/memory_store"
 require "zero_x_da/market/issuer_orders/service"
 require "zero_x_da/market/transport/issuer_api"
+require "zero_x_da/market/transport/channel_customer_assertion"
 require "zero_x_da/market/transport/json_api"
 
 class IssuerOrdersTest < Minitest::Test
@@ -92,6 +93,44 @@ class IssuerOrdersTest < Minitest::Test
     order, = create_order
     assert_equal ["channel.example", "100", "zero"],
                  [order.link_provider, order.link_provider_user_id, order.recipient_subject]
+  end
+
+  def test_a_channel_order_expires_unclaimed_like_a_browser_order
+    order, = create_order
+    assert_in_delta 900, order.authorization_expires_at - order.created_at, 0.001
+
+    @clock.advance(900)
+    claimed = @orders.claim(order.id, issuer: ISSUER)
+    assert_equal %w[rejected authorization_expired], [claimed.status, claimed.rejection_code]
+  end
+
+  def test_a_signed_channel_assertion_reaches_the_customer_routes_end_to_end
+    secret = "s" * 32
+    app = Rack::MockRequest.new(
+      ZeroXDA::Market::Transport::ChannelCustomerAssertion.new(
+        @client_app, secret: secret, users: @identity_store, providers: %w[channel.example], clock: @clock
+      )
+    )
+    assertion = lambda do |user, subject|
+      { "HTTP_X_MARKET_CUSTOMER_ASSERTION" => ZeroXDA::Market::Transport::ChannelCustomerAssertion.sign(
+        secret: secret, user_id: user.id, provider: "channel.example", provider_user_id: subject, now: @clock.call
+      ) }
+    end
+
+    assert_equal 401, app.get("/v1/issuer-accounts/#{ISSUER}").status
+    account = app.get("/v1/issuer-accounts/#{ISSUER}", assertion.call(@customer, "100"))
+    assert_equal 200, account.status
+    assert_equal "zero", JSON.parse(account.body).dig("data", "attributes", "pub_dress")
+
+    created = post(app, "/v1/issuer-orders", order_body, assertion.call(@customer, "100"))
+    assert_equal 201, created.status
+    document = JSON.parse(created.body).fetch("data")
+    assert_equal "zero", document.dig("attributes", "recipient_subject")
+    stored = @orders.find_for_customer(document.fetch("id"), customer_user_id: @customer.id)
+    assert_equal %w[channel.example 100], [stored.link_provider, stored.link_provider_user_id]
+
+    # The stranger cannot sign as the customer's channel account.
+    assert_equal 401, post(app, "/v1/issuer-orders", order_body, assertion.call(@stranger, "100")).status
   end
 
   def test_account_status_shows_only_the_public_handle_or_unlinked

@@ -14,7 +14,8 @@ module ZeroXDA
       class Service
         MAX_PAGE = 100
         # How long a customer's confirmed offer authorizes the issuer to start
-        # the debit. Later, a claim rejects the order instead of debiting.
+        # the debit, whichever channel placed it. Later, a claim rejects the
+        # order instead of debiting.
         AUTHORIZATION_TTL = 15 * 60
 
         # One of the customer's channel accounts and the issuer account the
@@ -191,7 +192,7 @@ module ZeroXDA
             amount_minor: price.amount_minor, price_id: price.id, recipient_subject: link.pub_dress,
             link_provider: link.provider, link_provider_user_id: link.provider_user_id, created_at: created_at,
             term_months: months, term_policy: months && Order::TERM_POLICY,
-            authorization_expires_at: verified_link && (created_at + AUTHORIZATION_TTL)
+            authorization_expires_at: created_at + AUTHORIZATION_TTL
           )
         end
 

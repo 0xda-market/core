@@ -135,8 +135,9 @@ class PostgresIssuerOrdersTest < Minitest::Test
   def test_term_and_authorization_deadline_persist_and_are_constrained
     within_fixture do |customer|
       order, = create_order(customer)
-      assert_equal [1, "calendar_months_utc", nil],
-                   [order.term_months, order.term_policy, order.authorization_expires_at]
+      assert_equal [1, "calendar_months_utc"], [order.term_months, order.term_policy]
+      # A channel order carries the same 15-minute deadline as a browser visit.
+      assert_in_delta 900, order.authorization_expires_at - order.created_at, 0.001
       assert_equal order.to_h, @store.find(order.id).to_h
 
       link = ZeroXDA::Market::IssuerOrders::Service::Link.new(provider: "nilx_visit", provider_user_id: "v" * 43,

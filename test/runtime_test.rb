@@ -134,13 +134,23 @@ class RuntimeTest < Minitest::Test
       assert_equal "route_not_found", JSON.parse(created.body).dig("errors", 0, "code")
     end
 
-    with_environment(base.merge("DEPLOY_ENV" => "development", "ENABLE_ISSUER_ORDER_ROUTES" => "1")) do
+    with_environment(base.merge("DEPLOY_ENV" => "development", "ENABLE_ISSUER_ORDER_ROUTES" => "1",
+                                "CHANNEL_ASSERTION_SECRET" => nil)) do
+      error = assert_raises(RuntimeError) { Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)) }
+      assert_includes error.message, "CHANNEL_ASSERTION_SECRET"
+    end
+
+    with_environment(base.merge("DEPLOY_ENV" => "development", "ENABLE_ISSUER_ORDER_ROUTES" => "1",
+                                "CHANNEL_ASSERTION_SECRET" => "c" * 32,
+                                "CHANNEL_ASSERTION_PROVIDERS" => "channel.example")) do
       app = Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__))
       assert_equal "unauthorized", issuer_account_error(app)
     end
 
     with_environment(base.merge("DEPLOY_ENV" => "production", "DATABASE_URL" => "postgresql://unused",
-                                "MANUAL_PROVIDER_TOKEN" => "operator-secret", "ENABLE_ISSUER_ORDER_ROUTES" => "1")) do
+                                "MANUAL_PROVIDER_TOKEN" => "operator-secret", "ENABLE_ISSUER_ORDER_ROUTES" => "1",
+                                "CHANNEL_ASSERTION_SECRET" => "c" * 32,
+                                "CHANNEL_ASSERTION_PROVIDERS" => "channel.example")) do
       error = assert_raises(RuntimeError) { Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)) }
       assert_includes error.message, "issuer order routes"
     end

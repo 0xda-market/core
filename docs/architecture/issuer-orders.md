@@ -122,8 +122,8 @@ the term starts when time remains (the issuer's priority rule); the market
 only fixes how long it is. The fulfil confirmation must name the same
 `term_months`, or it fails closed like any other mismatch.
 
-An order the customer confirmed in a browser visit carries
-`authorization_expires_at`, 15 minutes after creation. Until then the issuer
+Every order carries `authorization_expires_at`, 15 minutes after creation,
+whichever channel placed it (a browser visit or a channel adapter). Until then the issuer
 may claim it. A claim at or after the deadline rejects the order with
 `authorization_expired` instead, and repeating that claim returns the same
 rejection: an unclaimed order was never debited, so it can safely end. A claimed
@@ -219,6 +219,34 @@ The gate is enforced: routes are disabled unless
 `ENABLE_ISSUER_ORDER_ROUTES=1`, and production refuses that flag until a real
 verified channel adapter and end-to-end proof test are in place. Do **not**
 remove that refusal simply because the core's customer authorization tests pass.
+
+#### Signed channel assertion
+
+A channel adapter that runs in its own process (a messenger bot) cannot set a
+Rack key in the market's process. It proves the customer with a short-lived
+signed assertion instead, verified by `Transport::ChannelCustomerAssertion`
+before any route runs:
+
+```text
+X-Market-Customer-Assertion: v1.<base64url(JSON)>.<hex HMAC-SHA256>
+JSON = {"user_id","provider","provider_user_id","iat","exp"}   (Unix seconds)
+MAC  = HMAC-SHA256(CHANNEL_ASSERTION_SECRET, "zero-x-da-market-customer-v1." + payload)
+```
+
+The adapter signs one only after validating the provider's own login proof and
+resolving the user through `POST /v1/auth/external`. The market sets
+`zero_x_da.market.verified_customer_id` only when the MAC matches, the
+assertion lives at most 120 seconds and is current (30 seconds of clock skew),
+`provider` is listed in `CHANNEL_ASSERTION_PROVIDERS`, and the market's own
+identity store says that channel account belongs to that active user. Anything
+else leaves the context unset, so customer routes answer `401`; a value already
+in the Rack environment is discarded. The shared public bearer token is still
+required.
+
+`ENABLE_ISSUER_ORDER_ROUTES=1` refuses to boot without
+`CHANNEL_ASSERTION_SECRET` (at least 32 bytes, held only by the market and the
+adapter) and `CHANNEL_ASSERTION_PROVIDERS`. Production keeps refusing the flag
+until the channel flow is proven end to end in development.
 
 ### Issuer integration
 

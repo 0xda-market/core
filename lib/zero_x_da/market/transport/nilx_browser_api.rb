@@ -200,6 +200,13 @@ module ZeroXDA
               return_path.is_a?(String) && return_path.match?(/\A\/(?:[a-z0-9-]+\/)?\z/)
             purchase = { "visit_id" => visit, "recipient" => recipient, "return_path" => return_path }
           end
+          if body.key?("pickup_order_id")
+            id = body.fetch("pickup_order_id")
+            raise ArgumentError unless purchase["visit_id"] && id.is_a?(String) && id.match?(/\A[A-Za-z0-9._:-]{8,128}\z/)
+            # An Identity-authenticated hint to collect an existing paid order.
+            # The return authority still checks receipt ownership and fulfilment.
+            purchase["pickup_order_id"] = id
+          end
           { "subject" => subject, "point" => point, "seeds" => seeds,
             "seeds_authority" => authority, "avaia" => { "longitude" => lng, "latitude" => lat },
             "category" => "0x1" }.merge(purchase).merge(camera ? { "camera" => camera } : {}).merge(scene ? { "scene" => scene } : {})

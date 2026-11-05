@@ -51,6 +51,20 @@ class NilxBrowserAPITest < Minitest::Test
       "CONTENT_TYPE" => "application/x-www-form-urlencoded", input: "code=#{code}")
   end
 
+  def test_paid_pickup_hint_requires_a_complete_trusted_visit
+    @context[:pickup_order_id] = "paid-order-123"
+    assert_equal 422, issue.status
+    @context.merge!(visit_id: "v" * 43, recipient: "0x0sky", return_path: "/telegram/")
+    code = JSON.parse(issue.body).fetch("code")
+    cookie = exchange(code)["set-cookie"].split(";").first
+    view = JSON.parse(@client.get("/session", "HTTP_COOKIE" => cookie).body)
+    assert_equal "paid-order-123", view["pickup_order_id"]
+    refute view.key?("recipient")
+    refute view.key?("entitlement")
+    @context[:pickup_order_id] = "../other"
+    assert_equal 422, issue.status
+  end
+
   def test_requires_service_authentication_and_trusted_browser_origin
     assert_equal 401, @client.post("/handoffs", input: JSON.generate(@context)).status
     code = JSON.parse(issue.body).fetch("code")

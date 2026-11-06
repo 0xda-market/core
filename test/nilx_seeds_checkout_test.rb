@@ -43,6 +43,7 @@ class NilxSeedsCheckoutTest < Minitest::Test
     identities = M::Identity::Service.new(store: @users, clock: -> { @now })
     metadata = { "family" => "0x1_subscription", "payment_modes" => ["seeds"],
       "purchase" => { "recipient" => { "provider" => "0x1", "modes" => ["self"] } },
+      "broker" => { "kind" => "market_broker", "id" => "0xda-market", "stock" => "unlimited" },
       "supplier" => { "kind" => "system_broker", "id" => "0x1", "issuer" => "0x1" } }
     products = ["0x1_special_1m", "0x1_special_3m", "0x1_exclusive_1m"].map.with_index do |sku, index|
       M::Catalog::Product.new(sku: sku, name: sku, button_label: sku, locale: "en_US", position: index,
@@ -88,6 +89,7 @@ class NilxSeedsCheckoutTest < Minitest::Test
   def test_only_active_special_seed_offers_and_trusted_recipient
     offers = JSON.parse(@client.get("/offers", "HTTP_COOKIE" => @cookie).body).fetch("offers")
     assert_equal ["0x1_special_1m"], offers.map { |offer| offer.fetch("sku") }
+    assert_equal { "kind" => "market_broker", "id" => "0xda-market", "stock" => "unlimited" }, offers.first.fetch("broker")
     result = post
     assert_equal 201, result.status
     resource = JSON.parse(result.body).fetch("order")

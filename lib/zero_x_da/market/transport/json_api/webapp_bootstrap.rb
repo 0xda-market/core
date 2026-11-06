@@ -36,14 +36,14 @@ module ZeroXDA
                 executable_skus: executable_skus
               )
               preview = product.status == "inactive"
-              available = !preview && listed && !amount_usdt.nil?
+              available = !product.market_broker? && !preview && listed && !amount_usdt.nil?
               visible_amount_usdt = amount_usdt || (price&.amount_usdt if listed || preview)
               resource = present_webapp_product(
                 product,
                 price: visible_amount_usdt && price,
                 amount_usdt: visible_amount_usdt,
                 currency: currency,
-                listed: listed,
+                listed: listed || (product.market_broker? && !preview),
                 available: available
               )
               if preview

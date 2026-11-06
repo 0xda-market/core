@@ -18,7 +18,7 @@ module ZeroXDA
             data = products.map do |product|
               resource = present_product(product)
               preview = product.status != "active"
-              available = !preview && (executable_skus.nil? || executable_skus.key?(product.sku))
+              available = !product.market_broker? && !preview && (executable_skus.nil? || executable_skus.key?(product.sku))
               price = preview ? nil : prices[product.sku]
               resource["attributes"]["preview"] = preview
               resource["attributes"]["available"] = available

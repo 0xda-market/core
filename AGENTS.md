@@ -39,9 +39,10 @@ authorization and is single-use unless the user explicitly says otherwise.
 
 ### Agent identity and attribution
 
-Applies to every coding agent and tool — Claude Code, ChatGPT Codex, Grok,
-Copilot, Cursor or any other system — whenever it writes to GitHub on behalf
-of a person.
+Applies to every coding agent and client, whatever its product or vendor —
+for example Kimi, Grok, Claude Code, Codex or any other — whenever it writes
+to GitHub on behalf of a person. The list of tools is open; nothing here
+depends on a particular one.
 
 Roles:
 
@@ -49,8 +50,8 @@ Roles:
   for it.
 - **Owner's bot** — the human owner's dedicated Git/GitHub bot identity,
   configured in the execution environment. It authors agent commits.
-- **Tool** — the agent product actually doing the work, named as the product
-  calls itself (`Claude Code`, `ChatGPT Codex`, `Grok`, ...).
+- **Tool** — the agent client actually doing the work, named as the product
+  calls itself.
 
 | Action       | Comes from                               | Signature                          |
 |--------------|------------------------------------------|------------------------------------|
@@ -65,9 +66,9 @@ Roles:
   environment. Never use the human owner's name or email, and never a tool
   vendor's noreply address, as the commit author.
 - Every agent commit ends with `Assisted-by: <Tool>` naming the tool that
-  actually ran, one line per tool. The model may follow in parentheses, e.g.
-  `Assisted-by: Claude Code (Claude Opus 5.5)` or
-  `Assisted-by: ChatGPT Codex`.
+  actually ran, one line per tool. The model may follow in parentheses:
+  `Assisted-by: <Tool> (<model>)`, e.g. `Assisted-by: Kimi` or
+  `Assisted-by: Grok (<model>)`.
 - `Co-authored-by` is only for real people or accounts that materially wrote
   part of the change. A vendor trailer that the tool's harness requires may
   stay, but it never replaces `Assisted-by`.

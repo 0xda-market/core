@@ -89,7 +89,7 @@ class NilxSeedsCheckoutTest < Minitest::Test
   def test_only_active_special_seed_offers_and_trusted_recipient
     offers = JSON.parse(@client.get("/offers", "HTTP_COOKIE" => @cookie).body).fetch("offers")
     assert_equal ["0x1_special_1m"], offers.map { |offer| offer.fetch("sku") }
-    assert_equal { "kind" => "market_broker", "id" => "0xda-market", "stock" => "unlimited" }, offers.first.fetch("broker")
+    assert_equal({ "kind" => "market_broker", "id" => "0xda-market", "stock" => "unlimited" }, offers.first.fetch("broker"))
     result = post
     assert_equal 201, result.status
     resource = JSON.parse(result.body).fetch("order")
@@ -100,6 +100,14 @@ class NilxSeedsCheckoutTest < Minitest::Test
     assert_equal "pending", resource.dig("attributes", "status")
     issuer = @orders.find_for_issuer(resource.fetch("id"), issuer: "0x1")
     assert_equal "v" * 43, issuer.link_provider_user_id
+  end
+
+  def test_two_buyers_can_order_the_same_market_offer_without_stock_reservations
+    first = post
+    second = post("/orders", @purchase, @other_cookie)
+    assert_equal 201, first.status
+    assert_equal 201, second.status
+    refute_equal JSON.parse(first.body).dig("order", "id"), JSON.parse(second.body).dig("order", "id")
   end
 
   def test_csrf_impersonation_and_cross_customer_access_fail_closed

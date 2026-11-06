@@ -122,6 +122,7 @@ class PostgresPersistenceTest < Minitest::Test
         026_0x1_system_digital_supplier
         027_issuer_order_terms
         028_market_point_addresses
+        029_subscription_market_broker
       ],
       versions
     )

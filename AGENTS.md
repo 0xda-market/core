@@ -69,9 +69,11 @@ Roles:
   actually ran, one line per tool. The model may follow in parentheses:
   `Assisted-by: <Tool> (<model>)`, e.g. `Assisted-by: Kimi` or
   `Assisted-by: Grok (<model>)`.
-- `Co-authored-by` is only for real people or accounts that materially wrote
-  part of the change. A vendor trailer that the tool's harness requires may
-  stay, but it never replaces `Assisted-by`.
+- `Co-authored-by` names people or accounts that materially wrote part of
+  the change. Keep the tool vendor's own trailer when the tool provides one,
+  e.g. `Co-authored-by: <Tool> <vendor noreply address>`: GitHub shows it as a
+  co-author, while `Assisted-by` stays plain text. Use both; neither replaces
+  the other.
 - If no bot identity is configured, stop and ask. Do not fall back to the
   human owner's identity.
 

@@ -27,6 +27,8 @@ begin
     rows.each do |row|
       metadata = row[:metadata].is_a?(String) ? JSON.parse(row[:metadata]) : row[:metadata]
       valid = %w[active inactive].include?(row[:status]) && row[:marketable] && row[:seeds].to_i.positive? &&
+        metadata["broker"] == { "kind" => "market_broker", "id" => "0xda-market", "stock" => "unlimited" } &&
+        metadata.dig("purchase", "quantity_mode") == "single" &&
         metadata["family"] == "0x1_subscription" && Array(metadata["payment_modes"]).include?("seeds") &&
         metadata["supplier"] == { "kind" => "system_broker", "id" => "0x1", "issuer" => "0x1" } &&
         metadata.dig("purchase", "recipient", "provider") == "0x1" &&

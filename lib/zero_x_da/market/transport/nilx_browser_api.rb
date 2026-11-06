@@ -127,7 +127,7 @@ module ZeroXDA
               product, price = entry.values_at(:product, :price)
               next unless SPECIAL.include?(product.sku) && product.system_broker?
               { sku: product.sku, price_id: price.id, amount_minor: price.amount_minor,
-                denomination: "seeds", months: product.metadata["duration_months"],
+                broker: product.metadata["broker"], denomination: "seeds", months: product.metadata["duration_months"],
                 term_policy: IssuerOrders::Order::TERM_POLICY,
                 authorization_ttl_seconds: IssuerOrders::Service::AUTHORIZATION_TTL }
             end

@@ -45,6 +45,8 @@ class Ox1SubscriptionCatalogTest < Minitest::Test
         assert_equal({ "kind" => "system_broker", "id" => "0x1", "issuer" => "0x1" },
                      product.supplier, sku)
         assert product.system_broker?, sku
+        assert product.market_broker?, sku
+        assert_equal({ "kind" => "market_broker", "id" => "0xda-market", "stock" => "unlimited" }, product.metadata["broker"], sku)
         assert_equal tier, product.metadata.fetch("tier"), sku
         assert_equal months, product.metadata.fetch("duration_months"), sku
         assert_equal "single", product.metadata.dig("purchase", "quantity_mode"), sku

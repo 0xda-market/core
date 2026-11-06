@@ -13,6 +13,8 @@ module ZeroXDA
         CURRENCY_FAMILY = "currency"
         SYSTEM_SUPPLIER_ID = /\A[a-z0-9][a-z0-9._-]{0,63}\z/
 
+        MARKET_BROKER = { "kind" => "market_broker", "id" => "0xda-market", "stock" => "unlimited" }.freeze
+
         attr_reader :sku,
                     :short_name,
                     :name,
@@ -58,6 +60,9 @@ module ZeroXDA
 
           @metadata = Core::RecordSupport.document(metadata, field: "metadata")
           validate_supplier!
+          if @metadata.key?("broker") && (!system_broker? || @metadata["broker"] != MARKET_BROKER)
+            raise ArgumentError, "market broker requires issuer-backed unlimited supply"
+          end
           @status = status.dup.freeze
           @position = Core::RecordSupport.non_negative_integer(position, field: "position")
           @marketable = marketable ? true : false
@@ -92,6 +97,10 @@ module ZeroXDA
         # market.users broker or an infinite broker inventory listing.
         def system_broker?
           @metadata.dig("supplier", "kind") == "system_broker"
+        end
+
+        def market_broker?
+          @metadata["broker"] == MARKET_BROKER
         end
 
         def supplier

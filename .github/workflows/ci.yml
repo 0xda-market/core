@@ -130,3 +130,112 @@ jobs:
           ! grep -qx caddy <<<"$services"
           ! grep -R -E '(^|[^0-9])(80:80|443:443)' deploy/vps/compose.yaml
           test ! -e deploy/vps/Caddyfile
+
+  # Automatic production delivery of market-api-production (aiaiaiai-org/infra
+  # docs/automatic-delivery.md, docs/market-postgres-production.md). Runs only
+  # for a master push whose CI passed, and only once the owner set the
+  # repository variable PRODUCTION_DELIVERY=enabled after filling the
+  # production Environment. Infra verifies both attestations against this
+  # workflow, branch and commit; this repository holds no infra credential.
+  publish-production:
+    needs: [unit, test, docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.PRODUCTION_DELIVERY == 'enabled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      IMAGE: ghcr.io/0xda-market/core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Seal the production credentials to the edge-prod-1 recipient
+        env:
+          MARKET_POSTGRES_PASSWORD: ${{ secrets.MARKET_POSTGRES_PASSWORD }}
+          PUBLIC_API_TOKEN: ${{ secrets.PUBLIC_API_TOKEN }}
+          MANUAL_PROVIDER_TOKEN: ${{ secrets.MANUAL_PROVIDER_TOKEN }}
+          NILX_BROWSER_HANDOFF_TOKEN: ${{ secrets.NILX_BROWSER_HANDOFF_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          for name in MARKET_POSTGRES_PASSWORD PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN NILX_BROWSER_HANDOFF_TOKEN; do
+            value="$(printenv "$name")"
+            test -n "$value" || { echo "::error::Missing production secret $name." >&2; exit 1; }
+            [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || { echo "::error::Invalid multiline value for $name." >&2; exit 1; }
+          done
+          (( ${#MARKET_POSTGRES_PASSWORD} >= 24 )) || { echo "::error::MARKET_POSTGRES_PASSWORD must be at least 24 characters." >&2; exit 1; }
+          (( ${#NILX_BROWSER_HANDOFF_TOKEN} >= 32 )) || { echo "::error::NILX_BROWSER_HANDOFF_TOKEN must be at least 32 bytes." >&2; exit 1; }
+          # Core's DatabaseTarget requires the password in the URL. Derive it from
+          # the one password the database is created with, so they cannot drift.
+          MARKET_DATABASE_URL="$(ruby -rerb -e 'print "postgres://market:#{ERB::Util.url_encode(ENV.fetch("MARKET_POSTGRES_PASSWORD"))}@market-postgres-production:1927/market"')"
+          export MARKET_DATABASE_URL
+          echo "::add-mask::$MARKET_DATABASE_URL"
+          names=(MARKET_DATABASE_URL MARKET_POSTGRES_PASSWORD PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN NILX_BROWSER_HANDOFF_TOKEN)
+          # The envelope carries exactly the names market-api-production maps.
+          contract="$(curl -fsSL https://raw.githubusercontent.com/aiaiaiai-org/infra/master/contracts/services/market-api-production.yaml)"
+          mapped="$(sed -n 's/^      - [A-Z0-9_]*=\([A-Z0-9_]*\)$/\1/p' <<<"$(sed -n '/^    secrets:/,/^    [a-z]/p' <<<"$contract")" | sort)"
+          test "$mapped" = "$(printf '%s\n' "${names[@]}" | sort)" || {
+            echo "::error::market-api-production maps different secret names than this envelope carries." >&2
+            exit 1
+          }
+          server="$(curl -fsSL https://raw.githubusercontent.com/aiaiaiai-org/infra/master/contracts/servers/edge-prod-1.yaml)"
+          recipient="$(sed -n 's/^  encryptionRecipient: //p' <<<"$server")"
+          [[ "$recipient" =~ ^ssh-ed25519\ [A-Za-z0-9+/]{68}$ ]] || {
+            echo "::error::edge-prod-1 publishes no valid encryptionRecipient." >&2
+            exit 1
+          }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq age
+          mkdir -p "$RUNNER_TEMP/envelope"
+          for name in "${names[@]}"; do printf '%s=%s\n' "$name" "$(printenv "$name")"; done |
+            age --recipient "$recipient" --output "$RUNNER_TEMP/envelope/secrets.age"
+          test -s "$RUNNER_TEMP/envelope/secrets.age"
+          printf 'FROM scratch\nCOPY secrets.age /secrets.age\n' > "$RUNNER_TEMP/envelope/Dockerfile"
+          echo "ENVELOPE_CONTEXT=$RUNNER_TEMP/envelope" >> "$GITHUB_ENV"
+
+      - name: Authenticate to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and publish the commit image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+
+      - name: Attest the commit image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+      - name: Publish the secret envelope
+        id: envelope
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.ENVELOPE_CONTEXT }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ env.IMAGE }}:${{ github.sha }}.secrets
+
+      - name: Attest the secret envelope
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.envelope.outputs.digest }}
+          push-to-registry: true

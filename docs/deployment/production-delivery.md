@@ -27,7 +27,7 @@ attestations:
 | `PUBLIC_API_TOKEN` | Environment secret |
 | `MANUAL_PROVIDER_TOKEN` | Environment secret |
 | `NILX_BROWSER_HANDOFF_TOKEN` | Environment secret, the same value as 0x1 Identity's |
-| `TRADING_LAB_SERVICE_TOKEN` | Environment secret, at least 32 bytes; the same value as the production Telegram bot's `TRADING_LAB_TOKEN` |
+| `TRADING_LAB_SERVICE_TOKEN` | Environment secret, at least 32 bytes; authorized consumers must present the matching service token |
 
 `DatabaseTarget` refuses a production URL without a password, so the URL is
 derived from the one password: they cannot drift.

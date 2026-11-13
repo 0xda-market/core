@@ -27,13 +27,25 @@ attestations:
 | `PUBLIC_API_TOKEN` | Environment secret |
 | `MANUAL_PROVIDER_TOKEN` | Environment secret |
 | `NILX_BROWSER_HANDOFF_TOKEN` | Environment secret, the same value as 0x1 Identity's |
+| `TRADING_LAB_SERVICE_TOKEN` | Environment secret, at least 32 bytes; authorized consumers must present the matching service token |
 
 `DatabaseTarget` refuses a production URL without a password, so the URL is
 derived from the one password: they cannot drift.
 
+## Trading Lab
+
+Trading Lab (`0xda-market/trading-lab`) is part of production Market and runs
+on its capacity. Its infra workloads (`market-trading-lab` and its collectors)
+take `MARKET_DATABASE_URL` and `TRADING_LAB_SERVICE_TOKEN` from this envelope
+through `runtime.secretsFrom: market-api-production`, so Trading Lab holds no
+production secret and no separate database password. It keeps its tables in
+its own schema, `trading_lab`, inside the `market` database; Core's migrations
+use the `market` schema and never touch it. Development Trading Lab has no
+database.
+
 ## Turning it on (owner)
 
-1. Fill the **production** Environment's four secrets. Never commit, print or
+1. Fill the **production** Environment's five secrets. Never commit, print or
    paste a value. The password is at least 24 characters, the handoff secret at
    least 32 bytes.
 2. Set the repository variable `PRODUCTION_DELIVERY=enabled`. Until then the

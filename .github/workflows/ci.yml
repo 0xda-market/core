@@ -162,22 +162,27 @@ jobs:
           PUBLIC_API_TOKEN: ${{ secrets.PUBLIC_API_TOKEN }}
           MANUAL_PROVIDER_TOKEN: ${{ secrets.MANUAL_PROVIDER_TOKEN }}
           NILX_BROWSER_HANDOFF_TOKEN: ${{ secrets.NILX_BROWSER_HANDOFF_TOKEN }}
+          TRADING_LAB_SERVICE_TOKEN: ${{ secrets.TRADING_LAB_SERVICE_TOKEN }}
         run: |
           set -Eeuo pipefail
           umask 077
-          for name in MARKET_POSTGRES_PASSWORD PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN NILX_BROWSER_HANDOFF_TOKEN; do
+          for name in MARKET_POSTGRES_PASSWORD PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN NILX_BROWSER_HANDOFF_TOKEN TRADING_LAB_SERVICE_TOKEN; do
             value="$(printenv "$name")"
             test -n "$value" || { echo "::error::Missing production secret $name." >&2; exit 1; }
             [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || { echo "::error::Invalid multiline value for $name." >&2; exit 1; }
           done
           (( ${#MARKET_POSTGRES_PASSWORD} >= 24 )) || { echo "::error::MARKET_POSTGRES_PASSWORD must be at least 24 characters." >&2; exit 1; }
           (( ${#NILX_BROWSER_HANDOFF_TOKEN} >= 32 )) || { echo "::error::NILX_BROWSER_HANDOFF_TOKEN must be at least 32 bytes." >&2; exit 1; }
+          (( ${#TRADING_LAB_SERVICE_TOKEN} >= 32 )) || { echo "::error::TRADING_LAB_SERVICE_TOKEN must be at least 32 bytes." >&2; exit 1; }
           # Core's DatabaseTarget requires the password in the URL. Derive it from
           # the one password the database is created with, so they cannot drift.
           MARKET_DATABASE_URL="$(ruby -rerb -e 'print "postgres://market:#{ERB::Util.url_encode(ENV.fetch("MARKET_POSTGRES_PASSWORD"))}@market-postgres-production:1927/market"')"
           export MARKET_DATABASE_URL
           echo "::add-mask::$MARKET_DATABASE_URL"
-          names=(MARKET_DATABASE_URL MARKET_POSTGRES_PASSWORD PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN NILX_BROWSER_HANDOFF_TOKEN)
+          # Trading Lab is part of production Market: its workloads take the database URL and
+          # their service token from this envelope (infra runtime.secretsFrom), so it holds
+          # no production secret of its own.
+          names=(MARKET_DATABASE_URL MARKET_POSTGRES_PASSWORD PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN NILX_BROWSER_HANDOFF_TOKEN TRADING_LAB_SERVICE_TOKEN)
           # The envelope carries exactly the names market-api-production maps.
           contract="$(curl -fsSL https://raw.githubusercontent.com/aiaiaiai-org/infra/master/contracts/services/market-api-production.yaml)"
           mapped="$(sed -n 's/^      - [A-Z0-9_]*=\([A-Z0-9_]*\)$/\1/p' <<<"$(sed -n '/^    secrets:/,/^    [a-z]/p' <<<"$contract")" | sort)"

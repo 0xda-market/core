@@ -44,13 +44,23 @@ jobs:
           retention-days: 3
 
   test:
+    name: Integration (PostgreSQL ${{ matrix.pg_release }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pg_release: "17"
+            pg_image: postgres:17-alpine
+          # Match the immutable production PostgreSQL 18.6 image on edge-prod-1.
+          - pg_release: "18.6"
+            pg_image: postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     env:
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/zero_x_da_test
     services:
       postgres:
-        image: postgres:17-alpine
+        image: ${{ matrix.pg_image }}
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: zero_x_da_test

@@ -63,12 +63,15 @@ mock_payment_enabled = ENV.fetch("ENABLE_MOCK_PAYMENT_PROVIDER", "0") == "1"
 mock_payment_token = ENV["MOCK_PAYMENT_PROVIDER_TOKEN"]
 # Domain-separated issuer credentials reuse the deployed server-only secret
 # envelope without exposing browser handoff authority on the issuer endpoint.
-nilx_checkout = ENV.fetch("ENABLE_NILX_SEEDS_CHECKOUT", "0") == "1"
+# The handoff secret is the one switch: a Market that accepts 0x1 visits also
+# sells Special for seeds and binds the issuer API to 0x1. What can be bought
+# is decided by the catalog (bin/activate_nilx_seeds_checkout), not by a flag.
+handoff_secret = ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN", "")
+nilx_checkout = !handoff_secret.empty?
 issuer_api_token = ENV["ISSUER_API_TOKEN"].to_s
 issuer_api_issuer = ENV["ISSUER_API_ISSUER"].to_s
 if nilx_checkout
   require "openssl"
-  handoff_secret = ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN", "")
   raise "nilx checkout requires a strong handoff secret" if handoff_secret.bytesize < 32
   raise "nilx checkout owns the issuer API binding" unless issuer_api_token.empty? && issuer_api_issuer.empty?
   issuer_api_token = OpenSSL::HMAC.hexdigest("SHA256", handoff_secret, "nilx-market-issuer-v1")

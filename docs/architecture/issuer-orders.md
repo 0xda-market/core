@@ -265,11 +265,14 @@ Origin, JSON content type and `X-Market-Csrf: 1` protect mutations. Customers ca
 read their own orders and cancel only while pending. Processing/fulfilment stay
 on the authenticated issuer API.
 
-`ENABLE_NILX_SEEDS_CHECKOUT=1` binds that API exclusively to `0x1`. Its credential
-is HMAC-SHA256 of `nilx-market-issuer-v1`, keyed by `NILX_BROWSER_HANDOFF_TOKEN`,
-encoded as lowercase hex. The browser never receives either secret. Existing
-explicit `ISSUER_API_*` settings must be removed before enabling this binding;
+Checkout needs no flag of its own: wherever `NILX_BROWSER_HANDOFF_TOKEN` is set,
+the visit adapter sells Special for seeds and the issuer API is bound exclusively
+to `0x1`. Its credential is HMAC-SHA256 of `nilx-market-issuer-v1`, keyed by that
+token, encoded as lowercase hex. The browser never receives either secret.
+Explicit `ISSUER_API_*` settings cannot be combined with the handoff token;
 ambiguous issuer configuration fails startup. Generic customer routes remain off.
+What is actually for sale is the catalog's decision: `/offers` is empty until the
+Special products are active.
 
 The release order is issuer worker, Market API, edge routing, browser clients,
 then `bundle exec ruby bin/activate_nilx_seeds_checkout` to inspect the catalog.

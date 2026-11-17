@@ -47,7 +47,7 @@ class NilxSeedsCheckoutTest < Minitest::Test
       "supplier" => { "kind" => "system_broker", "id" => "0x1", "issuer" => "0x1" } }
     products = ["0x1_special_1m", "0x1_special_3m", "0x1_exclusive_1m"].map.with_index do |sku, index|
       M::Catalog::Product.new(sku: sku, name: sku, button_label: sku, locale: "en_US", position: index,
-        status: index == 1 ? "inactive" : "active",
+        status: "active",
         metadata: metadata.merge("duration_months" => sku[/_(\d+)m\z/, 1].to_i), created_at: @now)
     end
     catalog = M::Catalog::Service.new(store: M::Catalog::MemoryStore.new(products: products))
@@ -84,6 +84,23 @@ class NilxSeedsCheckoutTest < Minitest::Test
   def post(path = "/orders", body = @purchase, cookie = @cookie, **headers)
     @client.post(path, { "HTTP_COOKIE" => cookie, "HTTP_ORIGIN" => M::Transport::NilxBrowserAPI::TARGET,
       "HTTP_X_MARKET_CSRF" => "1", "CONTENT_TYPE" => "application/json", input: JSON.generate(body) }.merge(headers))
+  end
+
+  # The 3-month Special is active and has a seeds price here: it is sold for
+  # real money only, so seeds never offer it and never accept an order for it.
+  def test_only_the_one_month_special_is_sold_for_seeds
+    offers = JSON.parse(@client.get("/offers", "HTTP_COOKIE" => @cookie).body).fetch("offers")
+    assert_equal ["0x1_special_1m"], offers.map { |offer| offer.fetch("sku") }
+    longer = @purchase.merge("sku" => "0x1_special_3m", "amount_minor" => 1632)
+    assert_equal 422, post("/orders", longer).status
+  end
+
+  def test_price_ids_travel_as_decimal_strings_and_numbers_are_still_accepted
+    offer = JSON.parse(@client.get("/offers", "HTTP_COOKIE" => @cookie).body).fetch("offers").first
+    assert_match(/\A[1-9][0-9]*\z/, offer.fetch("price_id"))
+    assert_equal 201, post("/orders", @purchase.merge("price_id" => offer.fetch("price_id").to_i)).status
+    wrong = @purchase.merge("price_id" => "0", "idempotency_key" => "purchase-key-0002")
+    assert_equal 422, post("/orders", wrong).status
   end
 
   def test_only_active_special_seed_offers_and_trusted_recipient

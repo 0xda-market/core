@@ -260,7 +260,9 @@ The `/nilx-browser` adapter accepts only a one-use, server-authenticated visit.
 It retains the recipient and opaque visit reference server-side. Customer JSON
 can select a Special SKU, current price ID/amount and idempotency key; it cannot
 select a wallet, recipient, issuer, session or grant duration. `/offers` includes
-only active Special products with a current seeds price and system supplier.
+only the one-month Special (`0x1_special_1m`), when it is active with a current
+seeds price and a system supplier; the longer terms are for real money only and
+are neither offered nor accepted for seeds. The price ID is a decimal string.
 Origin, JSON content type and `X-Market-Csrf: 1` protect mutations. Customers can
 read their own orders and cancel only while pending. Processing/fulfilment stay
 on the authenticated issuer API.
@@ -277,7 +279,7 @@ Special products are active.
 The release order is issuer worker, Market API, edge routing, browser clients,
 then `bundle exec ruby bin/activate_nilx_seeds_checkout` to inspect the catalog.
 Only after the deployment is authorized and verified, run the same command with
-`--activate`. It changes the four eligible Special records, preserves prices,
+`--activate`. It changes the one-month Special record, preserves prices,
 and never activates Exclusive, credits wallets or changes subscriptions.
 The default preflight makes no persistent changes. Product activation and deploy
 are separate from merging this implementation. The issuer must use confirmed

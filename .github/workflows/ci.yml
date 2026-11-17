@@ -244,3 +244,104 @@ jobs:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.envelope.outputs.digest }}
           push-to-registry: true
+
+  # Development Core API reaches edge-prod-1 the same way production does: infra pulls
+  # this verified master build and its envelope (docs/deployment/infra-development.md).
+  # No credential for infra exists here. A package has one <sha>.secrets envelope, so
+  # development publishes under its own package name.
+  publish-development:
+    needs: [unit, test, docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: development
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      IMAGE: ghcr.io/0xda-market/core-development
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Seal the development credentials to the edge-prod-1 recipient
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PUBLIC_API_TOKEN: ${{ secrets.PUBLIC_API_TOKEN }}
+          MANUAL_PROVIDER_TOKEN: ${{ secrets.MANUAL_PROVIDER_TOKEN }}
+          NILX_BROWSER_HANDOFF_TOKEN: ${{ secrets.NILX_BROWSER_HANDOFF_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          names=(DATABASE_URL PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN NILX_BROWSER_HANDOFF_TOKEN)
+          for name in "${names[@]}"; do
+            value="$(printenv "$name")"
+            test -n "$value" || { echo "::error::Missing development secret $name." >&2; exit 1; }
+            [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || { echo "::error::Invalid multiline value for $name." >&2; exit 1; }
+          done
+          (( ${#NILX_BROWSER_HANDOFF_TOKEN} >= 32 )) || { echo "::error::NILX_BROWSER_HANDOFF_TOKEN must be at least 32 bytes." >&2; exit 1; }
+          # The envelope carries exactly the names market-api-development maps.
+          contract="$(curl -fsSL https://raw.githubusercontent.com/aiaiaiai-org/infra/master/contracts/services/market-api-development.yaml)"
+          mapped="$(sed -n 's/^      - [A-Z0-9_]*=\([A-Z0-9_]*\)$/\1/p' <<<"$(sed -n '/^    secrets:/,/^    [a-z]/p' <<<"$contract")" | sort)"
+          test "$mapped" = "$(printf '%s\n' "${names[@]}" | sort)" || {
+            echo "::error::market-api-development maps different secret names than this envelope carries." >&2
+            exit 1
+          }
+          server="$(curl -fsSL https://raw.githubusercontent.com/aiaiaiai-org/infra/master/contracts/servers/edge-prod-1.yaml)"
+          recipient="$(sed -n 's/^  encryptionRecipient: //p' <<<"$server")"
+          [[ "$recipient" =~ ^ssh-ed25519\ [A-Za-z0-9+/]{68}$ ]] || {
+            echo "::error::edge-prod-1 publishes no valid encryptionRecipient." >&2
+            exit 1
+          }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq age
+          mkdir -p "$RUNNER_TEMP/envelope"
+          for name in "${names[@]}"; do printf '%s=%s\n' "$name" "$(printenv "$name")"; done |
+            age --recipient "$recipient" --output "$RUNNER_TEMP/envelope/secrets.age"
+          test -s "$RUNNER_TEMP/envelope/secrets.age"
+          printf 'FROM scratch\nCOPY secrets.age /secrets.age\n' > "$RUNNER_TEMP/envelope/Dockerfile"
+          echo "ENVELOPE_CONTEXT=$RUNNER_TEMP/envelope" >> "$GITHUB_ENV"
+
+      - name: Authenticate to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and publish the commit image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+
+      - name: Attest the commit image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+      - name: Publish the secret envelope
+        id: envelope
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.ENVELOPE_CONTEXT }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ env.IMAGE }}:${{ github.sha }}.secrets
+
+      - name: Attest the secret envelope
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.envelope.outputs.digest }}
+          push-to-registry: true

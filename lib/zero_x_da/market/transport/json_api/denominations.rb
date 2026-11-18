@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+# © 2026 aiaiaiai · aiaiaiai.org
 
 module ZeroXDA
   module Market
@@ -119,6 +120,7 @@ module ZeroXDA
               "sku" => price.sku,
               "denomination" => price.denomination,
               "amount_minor" => price.amount_minor,
+              "price_id" => price.id,
               "amount" => denomination && price.amount_string(denomination.scale),
               "symbol" => denomination&.symbol,
               "source" => price.source,

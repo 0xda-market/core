@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+# © 2026 aiaiaiai · aiaiaiai.org
 
 require_relative "../issuer_order_presenter"
 
@@ -24,11 +25,22 @@ module ZeroXDA
 
           def create_issuer_order(request)
             body = @request_parser.request_document(request)
+            terms = %w[expected_price_id expected_amount_minor expected_recipient_subject]
+            confirmed = terms.any? { |key| body.key?(key) }
+            if confirmed
+              price_id, amount, recipient = terms.map { |key| body.fetch(key) }
+              unless price_id.is_a?(Integer) && price_id.positive? && amount.is_a?(Integer) && amount.positive? &&
+                     recipient.is_a?(String) && !recipient.empty? && recipient.bytesize <= 128
+                raise ArgumentError, "invalid confirmed purchase terms"
+              end
+            end
             order, created = @issuer_orders.create(
               customer_user_id: verified_customer_id(request),
               sku: body.fetch("sku"),
               denomination: body.fetch("denomination"),
-              idempotency_key: body.fetch("idempotency_key")
+              idempotency_key: body.fetch("idempotency_key"),
+              expected_price: confirmed ? [price_id, amount] : nil,
+              expected_recipient_subject: confirmed ? recipient : nil
             )
             resource_response(created ? 201 : 200, present_issuer_order(order, audience: :customer))
           end

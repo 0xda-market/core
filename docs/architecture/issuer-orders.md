@@ -284,3 +284,20 @@ and never activates Exclusive, credits wallets or changes subscriptions.
 The default preflight makes no persistent changes. Product activation and deploy
 are separate from merging this implementation. The issuer must use confirmed
 server funds; importing legacy client balances is outside this checkout.
+
+
+## Channel-confirmed purchase terms
+
+`GET /v1/denominations/:code/prices` includes the append-only integer `price_id`
+in each entry's attributes. A channel can submit `expected_price_id`,
+`expected_amount_minor` and `expected_recipient_subject` together on
+`POST /v1/issuer-orders`. Partial or malformed terms are rejected.
+
+Core resolves the recipient from the customer's verified channel bindings, then
+compares that recipient and the current price with the confirmed terms before
+creating the order. `price_changed` and `recipient_changed` require a fresh user
+confirmation. Expected values never grant authority to select another recipient.
+An exact idempotency replay returns the original order even after catalog changes;
+a replay with changed confirmed terms returns `idempotency_conflict`.
+Legacy callers that omit all three fields retain their existing behavior. No
+catalog activation, route activation, USDT settlement or wallet debit is added.

@@ -301,3 +301,16 @@ An exact idempotency replay returns the original order even after catalog change
 a replay with changed confirmed terms returns `idempotency_conflict`.
 Legacy callers that omit all three fields retain their existing behavior. No
 catalog activation, route activation, USDT settlement or wallet debit is added.
+
+
+### Production Telegram runtime
+
+Production publication also requires `PARTNER_LOOKUP_TOKEN` (matching 0x1 and
+Bot) and `CHANNEL_ASSERTION_SECRET` (matching Bot), each at least 32 bytes and
+distinct. Infra maps the partner key to `ISSUER_DIRECTORY_TOKEN`, the lookup URL
+to `https://nilx.one/api/v1/partner/provider-lookup`, both provider allowlists to
+`telegram`, and enables channel issuer routes. Production delivery remains manual.
+The bot receives neither `NILX_BROWSER_HANDOFF_TOKEN` nor `ISSUER_API_TOKEN`.
+Before merging the coordinated producer/Infra changes, provision the matching
+production secrets; otherwise the next production candidate publication fails
+closed. Development mappings and USDT checkout are unchanged.

@@ -216,9 +216,10 @@ missing context, forged headers, body/query impersonation and cross-customer
 read/cancel/create attempts.
 
 The gate is enforced: routes are disabled unless
-`ENABLE_ISSUER_ORDER_ROUTES=1`, and production refuses that flag until a real
-verified channel adapter and end-to-end proof test are in place. Do **not**
-remove that refusal simply because the core's customer authorization tests pass.
+`ENABLE_ISSUER_ORDER_ROUTES=1`. The channel flow was proven end to end in
+development before production was allowed to enable the flag. Production still
+refuses to boot with it unless the assertion secret is at least 32 bytes and the
+issuer directory (URL, token and providers) is configured.
 
 #### Signed channel assertion
 
@@ -245,8 +246,8 @@ required.
 
 `ENABLE_ISSUER_ORDER_ROUTES=1` refuses to boot without
 `CHANNEL_ASSERTION_SECRET` (at least 32 bytes, held only by the market and the
-adapter) and `CHANNEL_ASSERTION_PROVIDERS`. Production keeps refusing the flag
-until the channel flow is proven end to end in development.
+adapter) and `CHANNEL_ASSERTION_PROVIDERS`. Production additionally requires
+`ISSUER_DIRECTORY_URL`, `ISSUER_DIRECTORY_TOKEN` and `ISSUER_DIRECTORY_PROVIDERS`.
 
 ### Issuer integration
 

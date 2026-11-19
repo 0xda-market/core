@@ -88,13 +88,12 @@ if issuer_directory_url.empty? != issuer_directory_token.empty?
 end
 # A server-injected, verified customer Rack context is required by the router.
 # A channel adapter in its own process (a messenger bot) supplies it with a
-# signed customer assertion (CHANNEL_ASSERTION_SECRET). The channel flow was
-# proven end to end in development; production may enable it only with a strong
-# assertion secret and a configured issuer directory (checked below).
-issuer_order_routes = ENV.fetch("ENABLE_ISSUER_ORDER_ROUTES", "0") == "1"
+# signed customer assertion. The configured adapter determines whether the
+# routes are mounted; production additionally requires an issuer directory.
 channel_assertion_secret = ENV["CHANNEL_ASSERTION_SECRET"].to_s
+issuer_order_routes = !channel_assertion_secret.empty?
 channel_assertion_providers = ENV["CHANNEL_ASSERTION_PROVIDERS"].to_s.split(",").map(&:strip).reject(&:empty?)
-if issuer_order_routes && (channel_assertion_secret.empty? || channel_assertion_providers.empty?)
+if issuer_order_routes && channel_assertion_providers.empty?
   raise "issuer order routes require CHANNEL_ASSERTION_SECRET and CHANNEL_ASSERTION_PROVIDERS"
 end
 market_payment_provider = ENV["MARKET_PAYMENT_PROVIDER"].to_s.strip

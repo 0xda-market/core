@@ -12,13 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Signed channel assertions: a channel adapter in its own process proves the
   verified customer to the issuer-order routes with a short-lived
   `X-Market-Customer-Assertion`, checked against the market's own identity
-  store. `ENABLE_ISSUER_ORDER_ROUTES=1` now requires `CHANNEL_ASSERTION_SECRET`
-  and `CHANNEL_ASSERTION_PROVIDERS`. Every issuer order now carries the
-  15-minute authorization deadline.
-- Production may enable `ENABLE_ISSUER_ORDER_ROUTES=1` now that the channel flow
-  is proven in development. It refuses to boot unless `CHANNEL_ASSERTION_SECRET`
-  is at least 32 bytes and the issuer directory (`ISSUER_DIRECTORY_URL`,
-  `ISSUER_DIRECTORY_TOKEN`, `ISSUER_DIRECTORY_PROVIDERS`) is configured.
+  store. The routes are mounted when the assertion adapter is configured.
+  Production also requires a strong assertion secret and a configured issuer
+  directory. Every issuer order carries the 15-minute authorization deadline.
 - Execution-aware client pricing and a locked pre-order profitability gate that
   prevents marketplace reservations below the configured net margin.
 - Issuer denominations: a non-fiat registry with `seeds` (₴€£) as the first

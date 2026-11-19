@@ -17,12 +17,6 @@ services:
         value: "10000"
       - key: ENABLE_MOCK_PAYMENT_PROVIDER
         value: "0"
-      # Both gates must be enabled manually only after the test Identity,
-      # TEST bot, issuer routes, catalog and end-to-end smoke are verified.
-      - key: ENABLE_NILX_SEEDS_CHECKOUT
-        sync: false
-      - key: ENABLE_ISSUER_ORDER_ROUTES
-        sync: false
       # Configure the existing 0xda-market-test Supabase *session pooler* URL
       # in the Render Dashboard. Never put a database password in Git.
       - key: DATABASE_URL

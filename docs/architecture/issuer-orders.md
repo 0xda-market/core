@@ -148,8 +148,7 @@ Only the trusted channel adapter may set this key after validating provider-sign
 login proof and resolving the authenticated user's market identity. An HTTP header,
 query string or JSON body field named `actor_user_id` never sets this context.
 Missing context returns `401` before reaching the service. These routes are mounted
-only with `ENABLE_ISSUER_ORDER_ROUTES=1`, which stays off by default and is refused
-in production until the real channel adapter is integrated and tested:
+when an assertion adapter is configured in the deployment environment:
 
 | Route | Purpose |
 | --- | --- |
@@ -215,11 +214,9 @@ cannot authenticate or resolve the user, it must fail closed. Core tests cover
 missing context, forged headers, body/query impersonation and cross-customer
 read/cancel/create attempts.
 
-The gate is enforced: routes are disabled unless
-`ENABLE_ISSUER_ORDER_ROUTES=1`. The channel flow was proven end to end in
-development before production was allowed to enable the flag. Production still
-refuses to boot with it unless the assertion secret is at least 32 bytes and the
-issuer directory (URL, token and providers) is configured.
+Without an assertion credential the customer routes are absent. Production
+requires a strong assertion secret and an issuer directory when an adapter is
+configured.
 
 #### Signed channel assertion
 
@@ -244,9 +241,8 @@ else leaves the context unset, so customer routes answer `401`; a value already
 in the Rack environment is discarded. The shared public bearer token is still
 required.
 
-`ENABLE_ISSUER_ORDER_ROUTES=1` refuses to boot without
 `CHANNEL_ASSERTION_SECRET` (at least 32 bytes, held only by the market and the
-adapter) and `CHANNEL_ASSERTION_PROVIDERS`. Production additionally requires
+adapter) requires `CHANNEL_ASSERTION_PROVIDERS`. Production additionally requires
 `ISSUER_DIRECTORY_URL`, `ISSUER_DIRECTORY_TOKEN` and `ISSUER_DIRECTORY_PROVIDERS`.
 
 ### Issuer integration

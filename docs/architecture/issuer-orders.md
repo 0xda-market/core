@@ -216,9 +216,10 @@ missing context, forged headers, body/query impersonation and cross-customer
 read/cancel/create attempts.
 
 The gate is enforced: routes are disabled unless
-`ENABLE_ISSUER_ORDER_ROUTES=1`, and production refuses that flag until a real
-verified channel adapter and end-to-end proof test are in place. Do **not**
-remove that refusal simply because the core's customer authorization tests pass.
+`ENABLE_ISSUER_ORDER_ROUTES=1`. The channel flow was proven end to end in
+development before production was allowed to enable the flag. Production still
+refuses to boot with it unless the assertion secret is at least 32 bytes and the
+issuer directory (URL, token and providers) is configured.
 
 #### Signed channel assertion
 
@@ -245,8 +246,8 @@ required.
 
 `ENABLE_ISSUER_ORDER_ROUTES=1` refuses to boot without
 `CHANNEL_ASSERTION_SECRET` (at least 32 bytes, held only by the market and the
-adapter) and `CHANNEL_ASSERTION_PROVIDERS`. Production keeps refusing the flag
-until the channel flow is proven end to end in development.
+adapter) and `CHANNEL_ASSERTION_PROVIDERS`. Production additionally requires
+`ISSUER_DIRECTORY_URL`, `ISSUER_DIRECTORY_TOKEN` and `ISSUER_DIRECTORY_PROVIDERS`.
 
 ### Issuer integration
 
@@ -284,3 +285,34 @@ and never activates Exclusive, credits wallets or changes subscriptions.
 The default preflight makes no persistent changes. Product activation and deploy
 are separate from merging this implementation. The issuer must use confirmed
 server funds; importing legacy client balances is outside this checkout.
+
+
+## Channel-confirmed purchase terms
+
+`GET /v1/denominations/:code/prices` includes the append-only integer `price_id`
+in each entry's attributes. A channel can submit `expected_price_id`,
+`expected_amount_minor` and `expected_recipient_subject` together on
+`POST /v1/issuer-orders`. Partial or malformed terms are rejected.
+
+Core resolves the recipient from the customer's verified channel bindings, then
+compares that recipient and the current price with the confirmed terms before
+creating the order. `price_changed` and `recipient_changed` require a fresh user
+confirmation. Expected values never grant authority to select another recipient.
+An exact idempotency replay returns the original order even after catalog changes;
+a replay with changed confirmed terms returns `idempotency_conflict`.
+Legacy callers that omit all three fields retain their existing behavior. No
+catalog activation, route activation, USDT settlement or wallet debit is added.
+
+
+### Production channel runtime
+
+Production publication also requires `PARTNER_LOOKUP_TOKEN` (matching the issuer
+directory and channel adapter) and `CHANNEL_ASSERTION_SECRET` (matching the
+adapter), each at least 32 bytes and distinct. Deployment maps the partner key to
+`ISSUER_DIRECTORY_TOKEN` and configures the directory URL, provider allowlists and
+issuer routes. Concrete channel mappings belong in the infrastructure contracts.
+The channel adapter receives neither `NILX_BROWSER_HANDOFF_TOKEN` nor
+`ISSUER_API_TOKEN`. Production delivery remains manual.
+Before merging the coordinated producer/Infra changes, provision the matching
+production secrets; otherwise the next production candidate publication fails
+closed. Development mappings and USDT checkout are unchanged.

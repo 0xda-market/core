@@ -3,6 +3,7 @@
 !.github/workflows/
 .github/workflows/*
 !.github/workflows/deploy-market-postgres.yml
+!.github/workflows/ci.yml
 .bundle
 coverage
 log

@@ -88,8 +88,9 @@ if issuer_directory_url.empty? != issuer_directory_token.empty?
 end
 # A server-injected, verified customer Rack context is required by the router.
 # A channel adapter in its own process (a messenger bot) supplies it with a
-# signed customer assertion (CHANNEL_ASSERTION_SECRET). Production stays off
-# until the channel flow has been proven end to end in development.
+# signed customer assertion (CHANNEL_ASSERTION_SECRET). The channel flow was
+# proven end to end in development; production may enable it only with a strong
+# assertion secret and a configured issuer directory (checked below).
 issuer_order_routes = ENV.fetch("ENABLE_ISSUER_ORDER_ROUTES", "0") == "1"
 channel_assertion_secret = ENV["CHANNEL_ASSERTION_SECRET"].to_s
 channel_assertion_providers = ENV["CHANNEL_ASSERTION_PROVIDERS"].to_s.split(",").map(&:strip).reject(&:empty?)
@@ -105,7 +106,12 @@ end
 
 if environment == "production"
   raise "mock payment provider cannot be enabled in production" if mock_payment_enabled
-  raise "issuer order routes cannot be enabled in production yet" if issuer_order_routes
+  if issuer_order_routes
+    raise "production issuer order routes require a CHANNEL_ASSERTION_SECRET of at least 32 bytes" if channel_assertion_secret.bytesize < 32
+    if issuer_directory_url.empty? || issuer_directory_providers.empty?
+      raise "production issuer order routes require ISSUER_DIRECTORY_URL, ISSUER_DIRECTORY_TOKEN and ISSUER_DIRECTORY_PROVIDERS"
+    end
+  end
   required_secrets = { "PUBLIC_API_TOKEN" => public_token, "MANUAL_PROVIDER_TOKEN" => operator_token,
                        "DATABASE_URL" => database_url }
   missing = required_secrets.filter_map { |name, value| name if value.nil? || value.empty? }

@@ -281,10 +281,33 @@ jobs:
           PUBLIC_API_TOKEN: ${{ secrets.PUBLIC_API_TOKEN }}
           MANUAL_PROVIDER_TOKEN: ${{ secrets.MANUAL_PROVIDER_TOKEN }}
           NILX_BROWSER_HANDOFF_TOKEN: ${{ secrets.NILX_BROWSER_HANDOFF_TOKEN }}
+          PARTNER_LOOKUP_TOKEN: ${{ secrets.PARTNER_LOOKUP_TOKEN }}
+          CHANNEL_ASSERTION_SECRET: ${{ secrets.CHANNEL_ASSERTION_SECRET }}
+          NILX_DEVELOPMENT_ORIGIN: ${{ vars.NILX_DEVELOPMENT_ORIGIN }}
         run: |
           set -Eeuo pipefail
           umask 077
-          names=(DATABASE_URL PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN NILX_BROWSER_HANDOFF_TOKEN)
+          [[ "$NILX_DEVELOPMENT_ORIGIN" =~ ^https://[a-z0-9-]+(\.[a-z0-9-]+)+$ ]] &&
+            [[ "$NILX_DEVELOPMENT_ORIGIN" != https://nilx.one && "$NILX_DEVELOPMENT_ORIGIN" != https://www.nilx.one ]] || {
+            echo "::error::NILX_DEVELOPMENT_ORIGIN must be an isolated HTTPS Identity origin without a path."
+            exit 1
+          }
+          for name in PARTNER_LOOKUP_TOKEN CHANNEL_ASSERTION_SECRET; do
+            value="${!name}"
+            (( ${#value} >= 32 )) || { echo "::error::$name must contain at least 32 bytes."; exit 1; }
+          done
+          test "$PARTNER_LOOKUP_TOKEN" != "$CHANNEL_ASSERTION_SECRET" || {
+            echo "::error::Use distinct checkout credentials."
+            exit 1
+          }
+          test "$PARTNER_LOOKUP_TOKEN" != "$NILX_BROWSER_HANDOFF_TOKEN" &&
+            test "$CHANNEL_ASSERTION_SECRET" != "$NILX_BROWSER_HANDOFF_TOKEN" || {
+            echo "::error::Checkout credentials must differ from issuer authority."
+            exit 1
+          }
+          export ISSUER_DIRECTORY_URL="$NILX_DEVELOPMENT_ORIGIN/api/v1/partner/provider-lookup"
+          names=(DATABASE_URL PUBLIC_API_TOKEN MANUAL_PROVIDER_TOKEN NILX_BROWSER_HANDOFF_TOKEN
+                 PARTNER_LOOKUP_TOKEN CHANNEL_ASSERTION_SECRET ISSUER_DIRECTORY_URL)
           for name in "${names[@]}"; do
             value="$(printenv "$name")"
             test -n "$value" || { echo "::error::Missing development secret $name." >&2; exit 1; }
@@ -293,7 +316,8 @@ jobs:
           (( ${#NILX_BROWSER_HANDOFF_TOKEN} >= 32 )) || { echo "::error::NILX_BROWSER_HANDOFF_TOKEN must be at least 32 bytes." >&2; exit 1; }
           # The envelope carries exactly the names market-api-development maps.
           contract="$(curl -fsSL https://raw.githubusercontent.com/aiaiaiai-org/infra/master/contracts/services/market-api-development.yaml)"
-          mapped="$(sed -n 's/^      - [A-Z0-9_]*=\([A-Z0-9_]*\)$/\1/p' <<<"$(sed -n '/^    secrets:/,/^    [a-z]/p' <<<"$contract")" | sort)"
+          mapped="$({ sed -n 's/^      - [A-Z0-9_]*=\([A-Z0-9_]*\)$/\1/p' <<<"$(sed -n '/^    secrets:/,/^    [a-z]/p' <<<"$contract")";
+            sed -n '/^    producerEnvironment:/,/^    [a-z]/s/^      - //p' <<<"$contract"; } | sort)"
           test "$mapped" = "$(printf '%s\n' "${names[@]}" | sort)" || {
             echo "::error::market-api-development maps different secret names than this envelope carries." >&2
             exit 1

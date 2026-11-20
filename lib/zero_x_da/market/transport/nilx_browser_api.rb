@@ -92,7 +92,12 @@ module ZeroXDA
 
         private
 
-        SPECIAL = %w[0x1_special_1m 0x1_special_3m 0x1_special_6m 0x1_special_12m].freeze
+        # What a Bond may buy with seeds. The longer Special terms are sold for
+        # real money only, once that path is open; they never appear as seed offers.
+        SEEDS_SKUS = %w[0x1_special_1m].freeze
+        # Price ids are database integers. They travel as decimal strings, the
+        # shape the browser client reads, and come back as the same string.
+        PRICE_ID = /\A[1-9][0-9]{0,17}\z/
 
         # Public: which point a Market path names and its canonical address.
         def points(request)
@@ -125,8 +130,8 @@ module ZeroXDA
             snapshot = @denominations.current_prices(denomination: "seeds")
             offers = snapshot.fetch(:entries).filter_map do |entry|
               product, price = entry.values_at(:product, :price)
-              next unless SPECIAL.include?(product.sku) && product.system_broker?
-              { sku: product.sku, price_id: price.id, amount_minor: price.amount_minor,
+              next unless SEEDS_SKUS.include?(product.sku) && product.system_broker?
+              { sku: product.sku, price_id: price.id.to_s, amount_minor: price.amount_minor,
                 broker: product.metadata["broker"], denomination: "seeds", months: product.metadata["duration_months"],
                 term_policy: IssuerOrders::Order::TERM_POLICY,
                 authorization_ttl_seconds: IssuerOrders::Service::AUTHORIZATION_TTL }
@@ -136,12 +141,14 @@ module ZeroXDA
           if request.post? && request.path_info == "/orders"
             body = JSON.parse(request.body.read(4097))
             raise ArgumentError unless body.is_a?(Hash) &&
-              body.keys.sort == %w[amount_minor idempotency_key price_id sku] && SPECIAL.include?(body["sku"])
+              body.keys.sort == %w[amount_minor idempotency_key price_id sku] && SEEDS_SKUS.include?(body["sku"])
+            price_id = body.fetch("price_id")
+            raise ArgumentError unless price_id.is_a?(Integer) || (price_id.is_a?(String) && PRICE_ID.match?(price_id))
             link = IssuerOrders::Service::Link.new(provider: "nilx_visit",
               provider_user_id: context.fetch("visit_id"), pub_dress: context.fetch("recipient"))
             order, created = @orders.create(customer_user_id: context.fetch("market_user_id"),
               sku: body.fetch("sku"), denomination: "seeds", idempotency_key: body.fetch("idempotency_key"),
-              verified_link: link, expected_price: [body.fetch("price_id"), body.fetch("amount_minor")])
+              verified_link: link, expected_price: [Integer(price_id), body.fetch("amount_minor")])
             return order_response(created ? 201 : 200, order)
           end
           match = %r{\A/orders/([A-Za-z0-9._:-]{1,128})(/cancel)?\z}.match(request.path_info)

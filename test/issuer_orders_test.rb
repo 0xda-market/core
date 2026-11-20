@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+# © 2026 aiaiaiai · aiaiaiai.org
 
 require_relative "test_helper"
 require "json"
@@ -66,13 +67,51 @@ class IssuerOrdersTest < Minitest::Test
       clock: @clock, id_generator: SequenceIDs.new
     )
     kernel, = build_kernel(provider: TestProvider.new(clock: @clock), clock: @clock)
-    @client_app = ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, catalog: @catalog, issuer_orders: @orders)
+    @client_app = ZeroXDA::Market::Transport::JSONAPI.new(kernel: kernel, catalog: @catalog, issuer_orders: @orders, denominations: @denominations)
     @client = customer_client(@customer.id)
     @stranger_client = customer_client(@stranger.id)
     @untrusted_client = Rack::MockRequest.new(@client_app)
     @issuer = Rack::MockRequest.new(
       ZeroXDA::Market::Transport::IssuerAPI.new(issuer_orders: @orders, issuer: ISSUER, token: "issuer-secret")
     )
+  end
+
+  def test_channel_confirmation_freezes_price_and_recipient_and_replays_after_catalog_changes
+    prices = JSON.parse(@client.get("/v1/denominations/seeds/prices").body).fetch("data")
+    price = prices.find { |entry| entry["id"] == "game_special" }.fetch("attributes")
+    terms = { "expected_price_id" => price.fetch("price_id"), "expected_amount_minor" => 400,
+              "expected_recipient_subject" => "zero" }
+    body = order_body.merge(terms)
+    created = post(@client, "/v1/issuer-orders", body)
+    assert_equal 201, created.status
+    id = JSON.parse(created.body).dig("data", "id")
+    @clock.advance(1)
+    @denominations.apply_prices([{ "sku" => "game_special", "amount_minor" => 500 }], denomination: "seeds")
+    replay = post(@client, "/v1/issuer-orders", body)
+    assert_equal 200, replay.status
+    assert_equal id, JSON.parse(replay.body).dig("data", "id")
+    assert_equal 400, JSON.parse(replay.body).dig("data", "attributes", "amount_minor")
+    changed = post(@client, "/v1/issuer-orders", body.merge("idempotency_key" => "new-confirmation"))
+    assert_equal 409, changed.status
+    assert_includes changed.body, "price_changed"
+    conflict = post(@client, "/v1/issuer-orders", body.merge("expected_recipient_subject" => "someone-else"))
+    assert_equal 409, conflict.status
+    assert_includes conflict.body, "idempotency_conflict"
+  end
+
+  def test_channel_confirmation_rejects_wrong_recipient_and_partial_or_malformed_terms
+    prices = JSON.parse(@client.get("/v1/denominations/seeds/prices").body).fetch("data")
+    price = prices.find { |entry| entry["id"] == "game_special" }.fetch("attributes")
+    terms = { "expected_price_id" => price.fetch("price_id"), "expected_amount_minor" => 400,
+              "expected_recipient_subject" => "another-bond" }
+    response = post(@client, "/v1/issuer-orders", order_body.merge(terms))
+    assert_equal 409, response.status
+    assert_includes response.body, "recipient_changed"
+    terms.each_key do |key|
+      assert_equal 400, post(@client, "/v1/issuer-orders", order_body.merge(terms.reject { |k, _| k == key })).status
+    end
+    assert_equal 422, post(@client, "/v1/issuer-orders", order_body.merge(terms).merge("expected_amount_minor" => "400")).status
+    assert_empty @orders.queue(issuer: ISSUER).first
   end
 
   def test_order_snapshots_price_and_the_customers_own_issuer_account

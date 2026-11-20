@@ -17,14 +17,28 @@ Production workloads and their PostgreSQL instance are never replaced by
 development activation. The development database must be the independent
 `0xda-market-test` **Supabase PostgreSQL** project.
 
-After the Infra contract PR has been merged, the Core workflow
-`.github/workflows/deploy-vps.yml` is **manual-only** and runs only from
-`master`, after successful exact-HEAD push Full CI. The workflow builds
-`ghcr.io/0xda-market/core` once and passes the immutable digest to Infra.
-Infra encrypts nothing on behalf of Core: Core obtains a per-request public
-recipient from Infra, encrypts only allowlisted credentials, and asks Infra
-to activate. Core waits for Infra's success before continuing; the API
-and its migrations must become healthy before the workers activate.
+The **Core API** is delivered without any credential for Infra. After Full
+CI is green on a `master` push, the `publish-development` job in
+`.github/workflows/ci.yml` runs in the `development` Environment and
+publishes two attested artifacts:
+
+- `ghcr.io/0xda-market/core-development:<full SHA>`, the image;
+- `ghcr.io/0xda-market/core-development:<full SHA>.secrets`, the `age`
+  envelope with exactly the names `market-api-development` maps, encrypted
+  to `edge-prod-1`'s public `encryptionRecipient`.
+
+Infra's **Reconcile deliveries** finds the `master` head, verifies both
+provenances and activates the API on its own; migrations run on start. The
+package is separate from production's `ghcr.io/0xda-market/core` because a
+package has one `<sha>.secrets` envelope per commit. In its package settings,
+`aiaiaiai-org/infra` needs **Read** (Manage Actions access).
+
+The FX and price workers still use the older manual workflow
+`.github/workflows/deploy-vps.yml`, which dispatches to Infra with
+`INFRA_DEPLOY_TOKEN`. It runs only from `master`, after successful
+exact-HEAD push Full CI, and activates the API before the workers. Prefer
+the automatic path for the API; move the workers to it before retiring the
+token.
 
 ## Credentials
 
@@ -32,9 +46,10 @@ In `0xda-market/core` GitHub Environment **development**, configure:
 
 - Secrets: `DATABASE_URL` (complete Session pooler or direct Supabase
   PostgreSQL URI), `PUBLIC_API_TOKEN`, `MANUAL_PROVIDER_TOKEN`.
-- Secret or appropriately scoped organization secret: `INFRA_DEPLOY_TOKEN`,
-  with permission to read recipient artifacts and dispatch to
-  `aiaiaiai-org/infra`.
+- `NILX_BROWSER_HANDOFF_TOKEN` (see "Browser handoff credential").
+- Only for the older worker workflow: `INFRA_DEPLOY_TOKEN`, with permission
+  to read recipient artifacts and dispatch to `aiaiaiai-org/infra`. The API
+  path needs no such token.
 
 The source credentials must **not** be copied to `infra` GitHub secrets.
 The target `aiaiaiai-org/infra` Environment **edge-prod-1** owns only

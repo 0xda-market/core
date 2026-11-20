@@ -2,6 +2,7 @@
 
 require_relative "test_helper"
 require "rack/mock"
+require "minitest/mock"
 
 class RuntimeTest < Minitest::Test
   def test_starts_in_health_only_mode_without_an_operator_token
@@ -124,35 +125,54 @@ class RuntimeTest < Minitest::Test
     end
   end
 
-  def test_customer_issuer_order_routes_are_off_unless_enabled_and_never_in_production
+  def test_customer_issuer_order_routes_require_configured_adapter_and_need_a_strong_setup_in_production
     base = { "PUBLIC_API_TOKEN" => "client-secret", "MANUAL_PROVIDER_TOKEN" => nil, "DATABASE_URL" => nil }
 
-    with_environment(base.merge("DEPLOY_ENV" => "development", "ENABLE_ISSUER_ORDER_ROUTES" => nil)) do
+    with_environment(base.merge("DEPLOY_ENV" => "development", "CHANNEL_ASSERTION_SECRET" => nil,
+                                "CHANNEL_ASSERTION_PROVIDERS" => "channel.example")) do
       app = Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__))
       assert_equal "route_not_found", issuer_account_error(app)
       created = post_json(app, "/v1/issuer-orders", {}, authorization: "Bearer client-secret")
       assert_equal "route_not_found", JSON.parse(created.body).dig("errors", 0, "code")
     end
 
-    with_environment(base.merge("DEPLOY_ENV" => "development", "ENABLE_ISSUER_ORDER_ROUTES" => "1",
-                                "CHANNEL_ASSERTION_SECRET" => nil)) do
+    with_environment(base.merge("DEPLOY_ENV" => "development", "CHANNEL_ASSERTION_SECRET" => "c" * 32,
+                                "CHANNEL_ASSERTION_PROVIDERS" => nil)) do
       error = assert_raises(RuntimeError) { Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)) }
       assert_includes error.message, "CHANNEL_ASSERTION_SECRET"
     end
 
-    with_environment(base.merge("DEPLOY_ENV" => "development", "ENABLE_ISSUER_ORDER_ROUTES" => "1",
-                                "CHANNEL_ASSERTION_SECRET" => "c" * 32,
+    with_environment(base.merge("DEPLOY_ENV" => "development", "CHANNEL_ASSERTION_SECRET" => "c" * 32,
                                 "CHANNEL_ASSERTION_PROVIDERS" => "channel.example")) do
       app = Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__))
       assert_equal "unauthorized", issuer_account_error(app)
     end
 
-    with_environment(base.merge("DEPLOY_ENV" => "production", "DATABASE_URL" => "postgresql://unused",
-                                "MANUAL_PROVIDER_TOKEN" => "operator-secret", "ENABLE_ISSUER_ORDER_ROUTES" => "1",
-                                "CHANNEL_ASSERTION_SECRET" => "c" * 32,
-                                "CHANNEL_ASSERTION_PROVIDERS" => "channel.example")) do
-      error = assert_raises(RuntimeError) { Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)) }
-      assert_includes error.message, "issuer order routes"
+    production = base.merge("DEPLOY_ENV" => "production",
+                            "DATABASE_URL" => "postgres://market:secret@market-postgres-production:1927/market",
+                            "MANUAL_PROVIDER_TOKEN" => "operator-secret",
+                            "CHANNEL_ASSERTION_PROVIDERS" => "channel.example",
+                            "ISSUER_DIRECTORY_URL" => "https://directory.example/lookup",
+                            "ISSUER_DIRECTORY_TOKEN" => "d" * 32, "ISSUER_DIRECTORY_PROVIDERS" => "channel.example")
+    boot = -> { Rack::Builder.parse_file(File.expand_path("../config.ru", __dir__)) }
+
+    # A weak secret or missing issuer directory prevents the production
+    # channel adapter from starting.
+    with_environment(production.merge("CHANNEL_ASSERTION_SECRET" => "c" * 31)) do
+      assert_includes assert_raises(RuntimeError, &boot).message, "CHANNEL_ASSERTION_SECRET of at least 32 bytes"
+    end
+    # A complete production setup gets past this guard and on to the database.
+    # Booting it for real needs PostgreSQL, so stop at the adapter with a marker.
+    reached_database = Class.new(StandardError)
+    ZeroXDA::Market::Adapters::PostgresDatabase.stub(:new, ->(**) { raise reached_database }) do
+      with_environment(production.merge("CHANNEL_ASSERTION_SECRET" => "c" * 32)) do
+        assert_raises(reached_database, &boot)
+      end
+    end
+    %w[ISSUER_DIRECTORY_URL ISSUER_DIRECTORY_TOKEN ISSUER_DIRECTORY_PROVIDERS].each do |name|
+      with_environment(production.merge("CHANNEL_ASSERTION_SECRET" => "c" * 32, name => nil)) do
+        assert_raises(RuntimeError, &boot)
+      end
     end
   end
 

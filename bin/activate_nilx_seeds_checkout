@@ -14,14 +14,16 @@ database = ZeroXDA::Market::Adapters::PostgresDatabase.new(url: ENV.fetch("DATAB
 begin
   db = database.connection
   db.transaction do
-    skus = [1, 3, 6, 12].map { |months| "0x1_special_#{months}m" }
+    # Only the one-month Special is sold for seeds. The longer terms are sold
+    # for real money later and are never activated here.
+    skus = ["0x1_special_1m"]
     rows = db.fetch(<<~SQL, skus).all
       SELECT p.sku, p.status, p.metadata, p.marketable,
              (SELECT amount_minor FROM market.denomination_prices d
               WHERE d.sku = p.sku AND d.denomination = 'seeds' ORDER BY id DESC LIMIT 1) AS seeds
       FROM market.products p WHERE p.sku IN ? ORDER BY p.sku FOR UPDATE
     SQL
-    abort "Special catalog incomplete" unless rows.length == 4
+    abort "Special catalog incomplete" unless rows.length == skus.length
     denomination = db[Sequel[:market][:denominations]].where(code: "seeds", issuer: "0x1", status: "active", scale: 0).first
     abort "seeds denomination unavailable" unless denomination
     rows.each do |row|
@@ -40,7 +42,7 @@ begin
       db[Sequel[:market][:products]].where(sku: skus, status: "inactive").update(
         status: "active", version: Sequel[:version] + 1, updated_at: Time.now.utc
       )
-      puts "Special seeds catalog activated; Exclusive unchanged"
+      puts "Special 1m seeds product activated; longer Special terms and Exclusive unchanged"
     else
       puts "Preflight passed; no products activated"
     end

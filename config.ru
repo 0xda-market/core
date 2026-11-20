@@ -63,12 +63,15 @@ mock_payment_enabled = ENV.fetch("ENABLE_MOCK_PAYMENT_PROVIDER", "0") == "1"
 mock_payment_token = ENV["MOCK_PAYMENT_PROVIDER_TOKEN"]
 # Domain-separated issuer credentials reuse the deployed server-only secret
 # envelope without exposing browser handoff authority on the issuer endpoint.
-nilx_checkout = ENV.fetch("ENABLE_NILX_SEEDS_CHECKOUT", "0") == "1"
+# The handoff secret is the one switch: a Market that accepts 0x1 visits also
+# sells Special for seeds and binds the issuer API to 0x1. What can be bought
+# is decided by the catalog (bin/activate_nilx_seeds_checkout), not by a flag.
+handoff_secret = ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN", "")
+nilx_checkout = !handoff_secret.empty?
 issuer_api_token = ENV["ISSUER_API_TOKEN"].to_s
 issuer_api_issuer = ENV["ISSUER_API_ISSUER"].to_s
 if nilx_checkout
   require "openssl"
-  handoff_secret = ENV.fetch("NILX_BROWSER_HANDOFF_TOKEN", "")
   raise "nilx checkout requires a strong handoff secret" if handoff_secret.bytesize < 32
   raise "nilx checkout owns the issuer API binding" unless issuer_api_token.empty? && issuer_api_issuer.empty?
   issuer_api_token = OpenSSL::HMAC.hexdigest("SHA256", handoff_secret, "nilx-market-issuer-v1")
@@ -85,12 +88,12 @@ if issuer_directory_url.empty? != issuer_directory_token.empty?
 end
 # A server-injected, verified customer Rack context is required by the router.
 # A channel adapter in its own process (a messenger bot) supplies it with a
-# signed customer assertion (CHANNEL_ASSERTION_SECRET). Production stays off
-# until the channel flow has been proven end to end in development.
-issuer_order_routes = ENV.fetch("ENABLE_ISSUER_ORDER_ROUTES", "0") == "1"
+# signed customer assertion. The configured adapter determines whether the
+# routes are mounted; production additionally requires an issuer directory.
 channel_assertion_secret = ENV["CHANNEL_ASSERTION_SECRET"].to_s
+issuer_order_routes = !channel_assertion_secret.empty?
 channel_assertion_providers = ENV["CHANNEL_ASSERTION_PROVIDERS"].to_s.split(",").map(&:strip).reject(&:empty?)
-if issuer_order_routes && (channel_assertion_secret.empty? || channel_assertion_providers.empty?)
+if issuer_order_routes && channel_assertion_providers.empty?
   raise "issuer order routes require CHANNEL_ASSERTION_SECRET and CHANNEL_ASSERTION_PROVIDERS"
 end
 market_payment_provider = ENV["MARKET_PAYMENT_PROVIDER"].to_s.strip
@@ -102,7 +105,12 @@ end
 
 if environment == "production"
   raise "mock payment provider cannot be enabled in production" if mock_payment_enabled
-  raise "issuer order routes cannot be enabled in production yet" if issuer_order_routes
+  if issuer_order_routes
+    raise "production issuer order routes require a CHANNEL_ASSERTION_SECRET of at least 32 bytes" if channel_assertion_secret.bytesize < 32
+    if issuer_directory_url.empty? || issuer_directory_providers.empty?
+      raise "production issuer order routes require ISSUER_DIRECTORY_URL, ISSUER_DIRECTORY_TOKEN and ISSUER_DIRECTORY_PROVIDERS"
+    end
+  end
   required_secrets = { "PUBLIC_API_TOKEN" => public_token, "MANUAL_PROVIDER_TOKEN" => operator_token,
                        "DATABASE_URL" => database_url }
   missing = required_secrets.filter_map { |name, value| name if value.nil? || value.empty? }

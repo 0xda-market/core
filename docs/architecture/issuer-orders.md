@@ -148,8 +148,7 @@ Only the trusted channel adapter may set this key after validating provider-sign
 login proof and resolving the authenticated user's market identity. An HTTP header,
 query string or JSON body field named `actor_user_id` never sets this context.
 Missing context returns `401` before reaching the service. These routes are mounted
-only with `ENABLE_ISSUER_ORDER_ROUTES=1`, which stays off by default and is refused
-in production until the real channel adapter is integrated and tested:
+when an assertion adapter is configured in the deployment environment:
 
 | Route | Purpose |
 | --- | --- |
@@ -215,10 +214,9 @@ cannot authenticate or resolve the user, it must fail closed. Core tests cover
 missing context, forged headers, body/query impersonation and cross-customer
 read/cancel/create attempts.
 
-The gate is enforced: routes are disabled unless
-`ENABLE_ISSUER_ORDER_ROUTES=1`, and production refuses that flag until a real
-verified channel adapter and end-to-end proof test are in place. Do **not**
-remove that refusal simply because the core's customer authorization tests pass.
+Without an assertion credential the customer routes are absent. Production
+requires a strong assertion secret and an issuer directory when an adapter is
+configured.
 
 #### Signed channel assertion
 
@@ -243,10 +241,9 @@ else leaves the context unset, so customer routes answer `401`; a value already
 in the Rack environment is discarded. The shared public bearer token is still
 required.
 
-`ENABLE_ISSUER_ORDER_ROUTES=1` refuses to boot without
 `CHANNEL_ASSERTION_SECRET` (at least 32 bytes, held only by the market and the
-adapter) and `CHANNEL_ASSERTION_PROVIDERS`. Production keeps refusing the flag
-until the channel flow is proven end to end in development.
+adapter) requires `CHANNEL_ASSERTION_PROVIDERS`. Production additionally requires
+`ISSUER_DIRECTORY_URL`, `ISSUER_DIRECTORY_TOKEN` and `ISSUER_DIRECTORY_PROVIDERS`.
 
 ### Issuer integration
 
@@ -260,22 +257,58 @@ The `/nilx-browser` adapter accepts only a one-use, server-authenticated visit.
 It retains the recipient and opaque visit reference server-side. Customer JSON
 can select a Special SKU, current price ID/amount and idempotency key; it cannot
 select a wallet, recipient, issuer, session or grant duration. `/offers` includes
-only active Special products with a current seeds price and system supplier.
+only the one-month Special (`0x1_special_1m`), when it is active with a current
+seeds price and a system supplier; the longer terms are for real money only and
+are neither offered nor accepted for seeds. The price ID is a decimal string.
 Origin, JSON content type and `X-Market-Csrf: 1` protect mutations. Customers can
 read their own orders and cancel only while pending. Processing/fulfilment stay
 on the authenticated issuer API.
 
-`ENABLE_NILX_SEEDS_CHECKOUT=1` binds that API exclusively to `0x1`. Its credential
-is HMAC-SHA256 of `nilx-market-issuer-v1`, keyed by `NILX_BROWSER_HANDOFF_TOKEN`,
-encoded as lowercase hex. The browser never receives either secret. Existing
-explicit `ISSUER_API_*` settings must be removed before enabling this binding;
+Checkout needs no flag of its own: wherever `NILX_BROWSER_HANDOFF_TOKEN` is set,
+the visit adapter sells Special for seeds and the issuer API is bound exclusively
+to `0x1`. Its credential is HMAC-SHA256 of `nilx-market-issuer-v1`, keyed by that
+token, encoded as lowercase hex. The browser never receives either secret.
+Explicit `ISSUER_API_*` settings cannot be combined with the handoff token;
 ambiguous issuer configuration fails startup. Generic customer routes remain off.
+What is actually for sale is the catalog's decision: `/offers` is empty until the
+Special products are active.
 
 The release order is issuer worker, Market API, edge routing, browser clients,
 then `bundle exec ruby bin/activate_nilx_seeds_checkout` to inspect the catalog.
 Only after the deployment is authorized and verified, run the same command with
-`--activate`. It changes the four eligible Special records, preserves prices,
+`--activate`. It changes the one-month Special record, preserves prices,
 and never activates Exclusive, credits wallets or changes subscriptions.
 The default preflight makes no persistent changes. Product activation and deploy
 are separate from merging this implementation. The issuer must use confirmed
 server funds; importing legacy client balances is outside this checkout.
+
+
+## Channel-confirmed purchase terms
+
+`GET /v1/denominations/:code/prices` includes the append-only integer `price_id`
+in each entry's attributes. A channel can submit `expected_price_id`,
+`expected_amount_minor` and `expected_recipient_subject` together on
+`POST /v1/issuer-orders`. Partial or malformed terms are rejected.
+
+Core resolves the recipient from the customer's verified channel bindings, then
+compares that recipient and the current price with the confirmed terms before
+creating the order. `price_changed` and `recipient_changed` require a fresh user
+confirmation. Expected values never grant authority to select another recipient.
+An exact idempotency replay returns the original order even after catalog changes;
+a replay with changed confirmed terms returns `idempotency_conflict`.
+Legacy callers that omit all three fields retain their existing behavior. No
+catalog activation, route activation, USDT settlement or wallet debit is added.
+
+
+### Production channel runtime
+
+Production publication also requires `PARTNER_LOOKUP_TOKEN` (matching the issuer
+directory and channel adapter) and `CHANNEL_ASSERTION_SECRET` (matching the
+adapter), each at least 32 bytes and distinct. Deployment maps the partner key to
+`ISSUER_DIRECTORY_TOKEN` and configures the directory URL, provider allowlists and
+issuer routes. Concrete channel mappings belong in the infrastructure contracts.
+The channel adapter receives neither `NILX_BROWSER_HANDOFF_TOKEN` nor
+`ISSUER_API_TOKEN`. Production delivery remains manual.
+Before merging the coordinated producer/Infra changes, provision the matching
+production secrets; otherwise the next production candidate publication fails
+closed. Development mappings and USDT checkout are unchanged.

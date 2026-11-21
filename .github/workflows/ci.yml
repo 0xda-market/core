@@ -43,7 +43,7 @@ jobs:
           path: unit-test.log
           retention-days: 3
 
-  test:
+  integration:
     name: Integration (PostgreSQL ${{ matrix.pg_release }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -114,6 +114,18 @@ jobs:
           EDGE_OWNER=infra
           ENV
           docker compose --file deploy/vps/compose.yaml --env-file deploy/vps/.env config --quiet
+
+  # Keep the branch protection context stable and require both matrix jobs.
+  test:
+    needs: integration
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require the PostgreSQL integration matrix to pass
+        env:
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+        run: test "$INTEGRATION_RESULT" = success
 
   docker:
     runs-on: ubuntu-latest
